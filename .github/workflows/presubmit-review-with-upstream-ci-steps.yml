@@ -37,6 +37,16 @@ jobs:
             echo "Error: LLM_API_KEY secret is not configured"
             exit 1
           fi
+
+      - name: Create reports directory
+        run: mkdir -p reports
+
+      - name: Download CI results
+        uses: actions/download-artifact@v4
+        with:
+          name: ci-results
+          path: reports
+
       - uses: kingychiu/ai-reviewer@ci-reading
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
