@@ -244,7 +244,6 @@ Consider the following CI/Linter results when reviewing the code:
 ${pr.ciResults.map(result => `
 === ${result.name} ===
 ${result.output}
-${result.error ? `Errors:\n${result.error}` : ''}
 `).join('\n')}
 ` : ''}
 `;
