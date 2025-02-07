@@ -47,10 +47,6 @@ const LLM_MODELS = [
     createAi: createGoogleGenerativeAI,
   },
   {
-    name: "gemini-1.5-flash-latest",
-    createAi: createGoogleGenerativeAI,
-  },
-  {
     name: "gemini-1.5-flash-8b",
     createAi: createGoogleGenerativeAI,
   },
