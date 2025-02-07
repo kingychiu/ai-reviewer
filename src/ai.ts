@@ -2,7 +2,7 @@ import config from "./config";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateObject } from "ai";
+import { generateObject, generateText } from "ai";
 import { info } from "@actions/core";
 import { z } from "zod";
 
@@ -65,6 +65,44 @@ const LLM_MODELS = [
   },
 ];
 
+async function runGeminiThinkingPrompt({
+  prompt,
+  systemPrompt,
+  schema,
+  model,
+  llm,
+}: {
+  prompt: string;
+  systemPrompt?: string;
+  schema: z.ZodObject<any, any>;
+  model: typeof LLM_MODELS[number];
+  llm: any;
+}) {
+  const schemaDescription = JSON.stringify(schema.shape, null, 2);
+  const enhancedSystemPrompt = `${systemPrompt || ""}
+Please format your response as a valid JSON object matching this schema:
+${schemaDescription}
+
+IMPORTANT: Your response must be a single, valid JSON object that matches the schema exactly.`;
+
+  const { text, usage } = await generateText({
+    model: llm(model.name),
+    prompt,
+    system: enhancedSystemPrompt,
+  });
+
+  if (process.env.DEBUG) {
+    info(`usage: \n${JSON.stringify(usage, null, 2)}`);
+  }
+
+  try {
+    const jsonResponse = JSON.parse(text);
+    return schema.parse(jsonResponse);
+  } catch (error) {
+    throw new Error(`Failed to parse AI response as JSON: ${error}\nResponse: ${text}`);
+  }
+}
+
 export async function runPrompt({
   prompt,
   systemPrompt,
@@ -80,6 +118,14 @@ export async function runPrompt({
   }
 
   const llm = model.createAi({ apiKey: config.llmApiKey });
+
+  if (model.name.includes("gemini") && model.name.includes("thinking")) {
+    // Gemini thinking models doesn't support generate object (json output)
+    // https://ai.google.dev/gemini-api/docs/thinking#limitations
+    return runGeminiThinkingPrompt({ prompt, systemPrompt, schema, model, llm });
+  }
+
+  // Generate object (json output)
   const { object, usage } = await generateObject({
     model: llm(model.name),
     prompt,
