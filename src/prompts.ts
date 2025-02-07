@@ -130,11 +130,17 @@ export type PullRequestReview = {
   comments: AIComment[];
 };
 
+export type CIResult = {
+  name: string;
+  output: string;
+};
+
 type PullRequestReviewPrompt = {
   prTitle: string;
   prDescription: string;
   prSummary: string;
   files: FileDiff[];
+  ciResults?: CIResult[];
 };
 
 export async function runReviewPrompt(
@@ -214,7 +220,6 @@ __new hunk__
     ...
     ]
 }
-</EXAMPLE>
 `;
 
   let userPrompt = `
@@ -233,6 +238,14 @@ ${pr.prSummary}
 <PR File Diffs>
 ${pr.files.map((file) => generateFileCodeDiff(file)).join("\n\n")}
 </PR File Diffs>
+
+${pr.ciResults?.length ? `
+Consider the following CI/Linter results when reviewing the code:
+${pr.ciResults.map(result => `
+=== ${result.name} ===
+${result.output}
+`).join('\n')}
+` : ''}
 `;
 
   const commentSchema = z.object({

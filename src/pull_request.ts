@@ -2,7 +2,7 @@ import { info, warning } from "@actions/core";
 import config from "./config";
 import { initOctokit } from "./octokit";
 import { loadContext } from "./context";
-import { runSummaryPrompt, AIComment, runReviewPrompt } from "./prompts";
+import { runSummaryPrompt, AIComment, runReviewPrompt, CIResult } from "./prompts";
 import {
   buildLoadingMessage,
   buildReviewSummary,
@@ -15,6 +15,7 @@ import { FileDiff, parseFileDiff } from "./diff";
 import { Octokit } from "@octokit/action";
 import { Context } from "@actions/github/lib/context";
 import { buildComment, listPullRequestCommentThreads } from "./comments";
+import fs from 'fs/promises';
 
 export async function handlePullRequest() {
   const context = await loadContext();
@@ -181,11 +182,15 @@ export async function handlePullRequest() {
 
   // ======= START REVIEW =======
 
+  const ciResults = await loadCIResults();
+  info(`Loaded ${ciResults.length} CI results`);
+
   const review = await runReviewPrompt({
     files: filesToReview,
     prTitle: pull_request.title,
     prDescription: pull_request.body || "",
     prSummary: summary.description,
+    ciResults,
   });
   info(`reviewed pull request`);
 
@@ -307,6 +312,48 @@ async function submitReview(
       )
     );
   }
+}
+
+async function loadCIResults(): Promise<CIResult[]> {
+  const results: CIResult[] = [];
+  const reportsDir = process.env.CI_REPORTS_DIR || 'reports';
+  
+  try {
+    // Check if directory exists
+    try {
+      await fs.access(reportsDir);
+    } catch (error) {
+      info(`CI reports directory '${reportsDir}' does not exist. Skipping CI results.`);
+      return results;
+    }
+
+    const files = await fs.readdir(reportsDir);
+    if (files.length === 0) {
+      info(`No CI result files found in '${reportsDir}'`);
+      return results;
+    }
+
+    for (const file of files) {
+      if (!file.endsWith('.txt')) continue;
+      
+      try {
+        const name = file.replace('.txt', '');
+        const content = await fs.readFile(`${reportsDir}/${file}`, 'utf-8');
+        
+        results.push({
+          name,
+          output: content
+        });
+      } catch (error) {
+        warning(`Failed to read CI result file '${file}': ${error}`);
+        // Continue processing other files even if one fails
+      }
+    }
+  } catch (error) {
+    warning(`Failed to load CI results: ${error}`);
+  }
+
+  return results;
 }
 
 function shouldIgnorePullRequest(pull_request: { body?: string }) {
