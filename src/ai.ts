@@ -71,19 +71,46 @@ async function runGeminiThinkingPrompt({
   schema,
   model,
   llm,
+  retryCount = 0,
+  previousErrors = [],
 }: {
   prompt: string;
   systemPrompt?: string;
   schema: z.ZodObject<any, any>;
   model: typeof LLM_MODELS[number];
   llm: any;
+  retryCount?: number;
+  previousErrors?: { error: string; response: string }[];
 }) {
+  const MAX_RETRIES = 5;
+  if (retryCount >= MAX_RETRIES) {
+    throw new Error(
+      `Failed to parse AI response as JSON after ${MAX_RETRIES} attempts. Latest error: ${previousErrors[previousErrors.length - 1]?.error
+      }`
+    );
+  }
+
   const schemaDescription = JSON.stringify(schema.shape, null, 2);
-  const enhancedSystemPrompt = `${systemPrompt || ""}
+  let enhancedSystemPrompt = `${systemPrompt || ""}
 Please format your response as a valid JSON object matching this schema:
 ${schemaDescription}
 
 IMPORTANT: Your response must be a single, valid JSON object that matches the schema exactly.`;
+
+  if (previousErrors.length > 0) {
+    enhancedSystemPrompt += `\n\nPrevious attempts failed with the following errors:
+${previousErrors
+        .map(
+          (attempt, i) => `
+Attempt ${i + 1}:
+Error: ${attempt.error}
+Response: ${attempt.response}
+`
+        )
+        .join("\n")}
+
+Please fix these issues and ensure the response is valid JSON.`;
+  }
 
   const { text, usage } = await generateText({
     model: llm(model.name),
@@ -98,8 +125,19 @@ IMPORTANT: Your response must be a single, valid JSON object that matches the sc
   try {
     const jsonResponse = JSON.parse(text);
     return schema.parse(jsonResponse);
-  } catch (error) {
-    throw new Error(`Failed to parse AI response as JSON: ${error}\nResponse: ${text}`);
+  } catch (err) {
+    const error = err as Error;
+    info(`Failed to parse AI response as JSON: ${error.message}`);
+
+    return runGeminiThinkingPrompt({
+      prompt,
+      systemPrompt,
+      schema,
+      model,
+      llm,
+      retryCount: retryCount + 1,
+      previousErrors: [...previousErrors, { error: error.message, response: text }],
+    });
   }
 }
 
