@@ -112,6 +112,8 @@ Response: ${attempt.response}
 Please fix these issues and ensure the response is valid JSON.`;
   }
 
+  console.log("enhancedSystemPrompt", enhancedSystemPrompt);
+
   const { text, usage } = await generateText({
     model: llm(model.name),
     prompt,
