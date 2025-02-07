@@ -11,8 +11,25 @@ on:
     types: [created]
 
 jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create reports directory
+        run: mkdir -p reports
+      - name: Write a sample report
+        run: echo "This code contain a SQL Injection Risk. Must be fixed." > reports/security.txt
+      - name: Upload CI results
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-results
+          path: reports/*.txt
+
   review:
     runs-on: ubuntu-latest
+    # only run this job when the previous job passed
+    needs: [ci]
+    # always run this job even the upstream job failed
+    if: always()
     steps:
       - name: Check required secrets
         run: |
@@ -20,25 +37,6 @@ jobs:
             echo "Error: LLM_API_KEY secret is not configured"
             exit 1
           fi
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Install Dependencies
-        run: npm install
-
-      - name: Create reports directory for CI results
-        run: mkdir -p reports
-
-      - name: Run TypeScript Compiler Check
-        run: npx tsc --noEmit 2>&1 | tee reports/tsc.txt
-        continue-on-error: true
-
-      - name: Upload CI results
-        uses: actions/upload-artifact@v4
-        with:
-          name: ci-results
-          path: reports/*.txt
-
       - uses: kingychiu/ai-reviewer@ci-reading
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
