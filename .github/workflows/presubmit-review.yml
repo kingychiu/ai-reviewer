@@ -20,8 +20,13 @@ jobs:
             echo "Error: LLM_API_KEY secret is not configured"
             exit 1
           fi
-      - uses: presubmit/ai-reviewer@latest
+      - name: Demo additional context - 1
+        run: echo "- Never use ternary operator." > style_guide_1.md
+      - name: Demo additional context - 2
+        run: echo "- Function should always begin with a comment that describe it." > style_guide_2.md
+      - uses: kingychiu/ai-reviewer@additional-context
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODEL: "claude-3-5-sonnet-20241022"
+          REVIEW_GUIDE_FILES: "style_guide_1.md,style_guide_2.md"
