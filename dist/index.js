@@ -285,7 +285,7 @@ ${Er.styleGuideRules}`:""}
     ]
 }
 </EXAMPLE>
-`,A=`
+`;console.log("systemPrompt",t);let A=`
 <PR title>
 ${e.prTitle}
 </PR title>

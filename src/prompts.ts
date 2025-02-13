@@ -223,6 +223,8 @@ ${config.styleGuideRules}`
 </EXAMPLE>
 `;
 
+console.log('systemPrompt', systemPrompt);
+
 
   let userPrompt = `
 <PR title>

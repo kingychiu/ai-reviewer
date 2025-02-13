@@ -20,8 +20,11 @@ jobs:
             echo "Error: LLM_API_KEY secret is not configured"
             exit 1
           fi
-      - uses: presubmit/ai-reviewer@latest
+      - uses: kingychiu/ai-reviewer@test-additional-context
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODEL: "claude-3-5-sonnet-20241022"
+        with:
+          style_guide_rules: |
+            - "Must put comments at the top of a function to explain what it does"
