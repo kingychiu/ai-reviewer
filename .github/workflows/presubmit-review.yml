@@ -25,3 +25,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_MODEL: "claude-3-5-sonnet-20241022"
+        with:
+          style_guide_rules: |
+            - "Must put comments at the top of a function to explain what it does"
