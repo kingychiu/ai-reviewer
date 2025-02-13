@@ -7,7 +7,7 @@ export class Config {
   public styleGuideRules: string | undefined;
 
   constructor() {
-    
+
     this.githubToken = process.env.GITHUB_TOKEN;
     if (!this.githubToken) {
       throw new Error("GITHUB_TOKEN is not set");
@@ -29,6 +29,7 @@ export class Config {
     console.log("[debug] loading extra inputs from .env");
 
     this.styleGuideRules = process.env.STYLE_GUIDE_RULES;
+    console.log('this.styleGuideRules', this.styleGuideRules)
   }
 
   public loadInputs() {
