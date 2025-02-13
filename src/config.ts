@@ -7,7 +7,6 @@ export class Config {
   public styleGuideRules: string | undefined;
 
   constructor() {
-
     this.githubToken = process.env.GITHUB_TOKEN;
     if (!this.githubToken) {
       throw new Error("GITHUB_TOKEN is not set");
@@ -42,7 +41,6 @@ export class Config {
     if (styleGuideRules.length && styleGuideRules[0].trim().length) {
       this.styleGuideRules = styleGuideRules.join("\n");
     }
-    console.log(`[info] style_guide_rules: ${this.styleGuideRules}`);
   }
 }
 
