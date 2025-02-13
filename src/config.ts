@@ -29,7 +29,6 @@ export class Config {
     console.log("[debug] loading extra inputs from .env");
 
     this.styleGuideRules = process.env.STYLE_GUIDE_RULES;
-    console.log('this.styleGuideRules', this.styleGuideRules)
   }
 
   public loadInputs() {
@@ -43,6 +42,7 @@ export class Config {
     if (styleGuideRules.length && styleGuideRules[0].trim().length) {
       this.styleGuideRules = styleGuideRules.join("\n");
     }
+    console.log(`[info] style_guide_rules: ${this.styleGuideRules}`);
   }
 }
 
