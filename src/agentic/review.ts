@@ -127,14 +127,14 @@ async function exploreWithAgent(
 }
 
 /**
- * One peer-debate round: every agent sees the union of the OTHER agents'
+ * One peer-discussion round: every agent sees the union of the OTHER agents'
  * current findings and revises its own position — agreeing, refuting (with
  * reasons, verified via tools), or adding missed issues — while keeping its own
  * model and persona. Agents run in parallel against a fixed snapshot of the
  * previous round's notes. An agent that errors keeps its prior position.
  */
-async function debateRound(
-  debaters: AgentSpec[],
+async function discussionRound(
+  participants: AgentSpec[],
   pr: AgenticReviewInput,
   currentNotes: AgentNotes[],
   roundNum: number
@@ -142,10 +142,10 @@ async function debateRound(
   const byId = new Map(currentNotes.map((n) => [n.agentId, n]));
 
   const results = await Promise.all(
-    debaters.map(async (agent): Promise<AgentNotes | null> => {
+    participants.map(async (agent): Promise<AgentNotes | null> => {
       const own = byId.get(agent.id) ?? null;
       const others = currentNotes.filter((n) => n.agentId !== agent.id);
-      if (others.length === 0) return own; // nothing to debate against
+      if (others.length === 0) return own; // nothing to discuss against
 
       const othersBlock = others
         .map((o) => `===== Findings from '${o.agentId}' =====\n${o.notes}`)
@@ -153,7 +153,7 @@ async function debateRound(
 
       const systemPrompt = `${baseReviewSystemPrompt(agent)}
 
-You are now in a DEBATE with the other reviewers. Critically evaluate their findings — do NOT rubber-stamp them. For each of their findings: AGREE only if you can confirm it (verify with read_file/grep), REFUTE it with a concrete reason if you believe it is wrong or a false positive, and ADD any issues everyone missed. Re-state your own findings, dropping any of yours that were correctly refuted. Output your updated findings in the same notes format.`;
+You are now in a DISCUSSION with the other reviewers. Critically evaluate their findings — do NOT rubber-stamp them. For each of their findings: AGREE only if you can confirm it (verify with read_file/grep), REFUTE it with a concrete reason if you believe it is wrong or a false positive, and ADD any issues everyone missed. Re-state your own findings, dropping any of yours that were correctly refuted. Output your updated findings in the same notes format.`;
 
       const userPrompt = `<Your Previous Findings>
 ${own ? own.notes : "(you produced no findings yet)"}
@@ -174,11 +174,11 @@ ${buildReviewUserPrompt(pr)}`;
           model: agent,
         });
         info(
-          `debate round ${roundNum}: '${agent.id}' updated (${result.steps} steps)`
+          `discussion round ${roundNum}: '${agent.id}' updated (${result.steps} steps)`
         );
         return { agentId: agent.id, notes: result.text };
       } catch (e) {
-        warning(`debate round ${roundNum} failed for '${agent.id}': ${e}`);
+        warning(`discussion round ${roundNum} failed for '${agent.id}': ${e}`);
         return own; // keep prior position on failure
       }
     })
@@ -241,8 +241,8 @@ Produce the final consolidated review.`;
  * Opt-in agentic review entrypoint. Returns the same PullRequestReview shape as
  * runReviewPrompt so it is a drop-in replacement in pull_request.ts.
  *
- * Pipeline: explore (AGENTS panel, parallel) -> [debate (DEBATE_AGENT)] ->
- * synthesize (SYNTHESIS_AGENT).
+ * Pipeline: explore (AGENTS panel, concurrent) -> [discussion (peer, when
+ * REVIEW_MODE=discussion)] -> synthesize (SYNTHESIS_AGENT).
  */
 export async function runAgenticReview(
   pr: AgenticReviewInput
@@ -256,7 +256,7 @@ export async function runAgenticReview(
   info(
     `agentic review: ${explorers.length} agent(s) [${explorers
       .map((a) => a.id)
-      .join(", ")}], strategy=${config.reviewStrategy}`
+      .join(", ")}], mode=${config.reviewMode}`
   );
 
   // Phase 1: explorers investigate the repo and produce notes (in parallel).
@@ -275,17 +275,17 @@ export async function runAgenticReview(
     return EMPTY_REVIEW;
   }
 
-  // Phase 2 (optional): peer debate — the panel critiques each other across
-  // rounds. Needs at least two surviving agents to debate.
-  if (config.reviewStrategy === "debate" && notes.length > 1) {
-    const debaters = explorers.filter((a) =>
+  // Phase 2 (optional): peer discussion — the panel critiques each other across
+  // rounds. Needs at least two surviving agents to have a discussion.
+  if (config.reviewMode === "discussion" && notes.length > 1) {
+    const participants = explorers.filter((a) =>
       notes.some((n) => n.agentId === a.id)
     );
-    for (let r = 1; r <= config.agenticDebateRounds; r++) {
+    for (let r = 1; r <= config.agenticDiscussionRounds; r++) {
       info(
-        `agentic review: debate round ${r}/${config.agenticDebateRounds}`
+        `agentic review: discussion round ${r}/${config.agenticDiscussionRounds}`
       );
-      notes = await debateRound(debaters, pr, notes, r);
+      notes = await discussionRound(participants, pr, notes, r);
       if (notes.length <= 1) break;
     }
   }

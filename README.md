@@ -154,7 +154,7 @@ summary and everything else are unchanged. It requires `LLM_PROVIDER=ai-sdk`
 > The agent reads files from the checked-out workspace, so make sure
 > `actions/checkout` runs before this step (the default workflow already does).
 
-#### A panel of agents (parallel or debate)
+#### A panel of agents (single or discussion)
 
 With agentic review enabled you can run a **panel of agents** via `AGENTS`. When
 set it **takes precedence over `LLM_MODEL`**; when empty the single `LLM_MODEL`
@@ -162,46 +162,48 @@ is used. Each agent has an `id` (label used in logs/attribution), a `model`,
 optional `instructions` (a focus/persona), and optional `provider`/`baseUrl`/
 `apiKey` so different agents can use different providers.
 
-The pipeline has three phases:
+There are two modes, set by `REVIEW_MODE`:
 
-- **explore** — the `AGENTS` panel; each agent reads the repo with tools and
-  reports findings (in parallel).
-- **debate** *(optional)* — when `REVIEW_STRATEGY=debate`, the panel agents
-  critique **each other's** findings for `AGENTIC_DEBATE_ROUNDS` rounds
-  (default 1). Each round, every agent sees the others' findings and agrees,
-  refutes (verifying with tools), or adds missed issues — keeping its own model
-  and persona. (A single agent has no peer, so debate is skipped.)
-- **synthesize** — the `SYNTHESIS_AGENT` merges/de-duplicates the findings,
-  weights them by cross-agent agreement, and maps them to precise diff lines.
+- **`single`** *(default)* — **explore → synthesize**. Each agent reads the repo
+  with tools and reports findings (concurrently); the synthesis agent merges
+  them.
+- **`discussion`** — **explore → discuss → synthesize**. After exploring, the
+  panel agents critique **each other's** findings for `AGENTIC_DISCUSSION_ROUNDS`
+  rounds (default 1). Each round, every agent sees the others' findings and
+  agrees, refutes (verifying with tools), or adds missed issues — keeping its own
+  model and persona. (Needs 2+ agents; a single agent has no peer, so discussion
+  is skipped.)
 
-`SYNTHESIS_AGENT` is configured independently and defaults to the base
-`LLM_MODEL` when unset — it does **not** reuse an explorer agent.
+The **synthesis** step (`SYNTHESIS_AGENT`) merges/de-duplicates the findings,
+weights them by cross-agent agreement, and maps them to precise diff lines. It
+is configured independently and defaults to the base `LLM_MODEL` when unset — it
+does **not** reuse an explorer agent.
 
 ```yaml
         env:
           # ...
           AGENTIC_REVIEW: "true"
-          REVIEW_STRATEGY: "debate"          # "parallel" (default) or "debate"
-          AGENTIC_DEBATE_ROUNDS: "1"         # peer-debate rounds (debate only)
+          REVIEW_MODE: "discussion"            # "single" (default) or "discussion"
+          AGENTIC_DISCUSSION_ROUNDS: "1"       # rounds (discussion mode only)
           # Simple: comma-separated model names (id defaults to the model):
           AGENTS: "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro"
           # — or — a JSON array with ids, focuses, and per-agent providers:
           # AGENTS: >-
           #   [{"id":"security","model":"anthropic/claude-sonnet-4.5","instructions":"Focus on security: injection, authz, secrets."},
           #    {"id":"correctness","model":"google/gemini-2.5-pro","instructions":"Focus on logic bugs and edge cases."}]
-          SYNTHESIS_AGENT: "openai/gpt-5"    # bare name or JSON object
+          SYNTHESIS_AGENT: "openai/gpt-5"      # bare name or JSON object
 ```
 
-> ⚠️ A larger panel (and especially `debate`) multiplies token usage and latency
-> on every PR. Start with one or two agents and 1 debate round.
+> ⚠️ A larger panel (and especially `discussion`) multiplies token usage and
+> latency on every PR. Start with one or two agents and 1 discussion round.
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `AGENTIC_REVIEW` | `false` | Enable the agentic, context-aware reviewer |
 | `AGENTS` | _(empty)_ | Explorer panel; overrides `LLM_MODEL` when set |
 | `SYNTHESIS_AGENT` | `LLM_MODEL` | Agent that merges findings into the final review |
-| `REVIEW_STRATEGY` | `parallel` | `parallel`, or `debate` (panel critiques each other) |
-| `AGENTIC_DEBATE_ROUNDS` | `1` | Peer-debate rounds when `REVIEW_STRATEGY=debate` |
+| `REVIEW_MODE` | `single` | `single`, or `discussion` (panel critiques each other) |
+| `AGENTIC_DISCUSSION_ROUNDS` | `1` | Peer-discussion rounds when `REVIEW_MODE=discussion` |
 | `AGENTIC_MAX_STEPS` | `12` | Tool-use steps allowed per agent |
 
 ### GitHub Enterprise Server Support

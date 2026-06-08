@@ -175,9 +175,9 @@ describe('Config', () => {
       expect(config.agenticReview).toBe(false);
       expect(config.agents).toEqual([]);
       expect(config.synthesisAgent).toBeUndefined();
-      expect(config.reviewStrategy).toBe('parallel');
+      expect(config.reviewMode).toBe('single');
       expect(config.agenticMaxSteps).toBe(12);
-      expect(config.agenticDebateRounds).toBe(1);
+      expect(config.agenticDiscussionRounds).toBe(1);
     });
 
     test('agenticReview parses truthy env values', () => {
@@ -191,13 +191,13 @@ describe('Config', () => {
       expect(new Config().agenticReview).toBe(false);
     });
 
-    test('reviewStrategy accepts debate, defaults otherwise', () => {
-      process.env.REVIEW_STRATEGY = 'debate';
-      expect(new Config().reviewStrategy).toBe('debate');
+    test('reviewMode accepts discussion, defaults to single otherwise', () => {
+      process.env.REVIEW_MODE = 'discussion';
+      expect(new Config().reviewMode).toBe('discussion');
 
-      process.env.REVIEW_STRATEGY = 'nonsense';
-      expect(new Config().reviewStrategy).toBe('parallel');
-      delete process.env.REVIEW_STRATEGY;
+      process.env.REVIEW_MODE = 'nonsense';
+      expect(new Config().reviewMode).toBe('single');
+      delete process.env.REVIEW_MODE;
     });
 
     test('agenticMaxSteps parses positive ints and ignores junk', () => {
@@ -267,16 +267,16 @@ describe('Config', () => {
       delete process.env.SYNTHESIS_AGENT;
     });
 
-    test('parses AGENTIC_DEBATE_ROUNDS, ignoring junk', () => {
-      process.env.AGENTIC_DEBATE_ROUNDS = '3';
-      expect(new Config().agenticDebateRounds).toBe(3);
+    test('parses AGENTIC_DISCUSSION_ROUNDS, ignoring junk', () => {
+      process.env.AGENTIC_DISCUSSION_ROUNDS = '3';
+      expect(new Config().agenticDiscussionRounds).toBe(3);
 
-      process.env.AGENTIC_DEBATE_ROUNDS = '0';
-      expect(new Config().agenticDebateRounds).toBe(1);
+      process.env.AGENTIC_DISCUSSION_ROUNDS = '0';
+      expect(new Config().agenticDiscussionRounds).toBe(1);
 
-      process.env.AGENTIC_DEBATE_ROUNDS = 'abc';
-      expect(new Config().agenticDebateRounds).toBe(1);
-      delete process.env.AGENTIC_DEBATE_ROUNDS;
+      process.env.AGENTIC_DISCUSSION_ROUNDS = 'abc';
+      expect(new Config().agenticDiscussionRounds).toBe(1);
+      delete process.env.AGENTIC_DISCUSSION_ROUNDS;
     });
   });
 });

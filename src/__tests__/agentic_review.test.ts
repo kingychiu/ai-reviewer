@@ -33,9 +33,9 @@ jest.mock("../config", () => ({
     llmProvider: "ai-sdk",
     llmBaseUrl: undefined,
     llmApiKey: "key",
-    reviewStrategy: "parallel",
+    reviewMode: "single",
     agenticMaxSteps: 12,
-    agenticDebateRounds: 1,
+    agenticDiscussionRounds: 1,
     styleGuideRules: "",
   },
 }));
@@ -80,9 +80,9 @@ beforeEach(() => {
   config.llmProvider = "ai-sdk";
   config.llmBaseUrl = undefined as any;
   config.llmApiKey = "key";
-  (config as any).reviewStrategy = "parallel";
+  (config as any).reviewMode = "single";
   (config as any).agenticMaxSteps = 12;
-  (config as any).agenticDebateRounds = 1;
+  (config as any).agenticDiscussionRounds = 1;
   config.styleGuideRules = "";
 });
 
@@ -144,7 +144,7 @@ describe("runAgenticReview - single agent", () => {
   });
 });
 
-describe("runAgenticReview - multi agent parallel", () => {
+describe("runAgenticReview - multi agent, single mode", () => {
   beforeEach(() => {
     (config as any).agents = [
       { id: "sec", model: "m1" },
@@ -152,7 +152,7 @@ describe("runAgenticReview - multi agent parallel", () => {
     ];
   });
 
-  test("explores each agent in parallel and synthesizes all notes", async () => {
+  test("explores each agent concurrently and synthesizes all notes", async () => {
     mockRunAgent
       .mockResolvedValueOnce({ text: "notes-A", steps: 1 })
       .mockResolvedValueOnce({ text: "notes-B", steps: 1 });
@@ -169,52 +169,52 @@ describe("runAgenticReview - multi agent parallel", () => {
     expect(result).toEqual(sampleReview);
   });
 
-  test("does NOT debate under the parallel strategy", async () => {
+  test("does NOT discuss in single mode", async () => {
     mockRunAgent.mockResolvedValue({ text: "notes", steps: 1 });
     mockRunStructured.mockResolvedValue(sampleReview);
 
     await runAgenticReview(pr);
 
-    expect(mockRunAgent).toHaveBeenCalledTimes(2); // 2 explore, no debate
+    expect(mockRunAgent).toHaveBeenCalledTimes(2); // 2 explore, no discussion
   });
 });
 
-describe("runAgenticReview - peer debate", () => {
+describe("runAgenticReview - discussion mode", () => {
   beforeEach(() => {
     (config as any).agents = [
       { id: "sec", model: "m1" },
       { id: "perf", model: "m2" },
     ];
-    (config as any).reviewStrategy = "debate";
+    (config as any).reviewMode = "discussion";
   });
 
-  test("each agent debates the others (1 round), then synthesizes", async () => {
+  test("each agent discusses the others (1 round), then synthesizes", async () => {
     mockRunAgent
       .mockResolvedValueOnce({ text: "explore-A", steps: 1 }) // explore sec
       .mockResolvedValueOnce({ text: "explore-B", steps: 1 }) // explore perf
-      .mockResolvedValueOnce({ text: "debate-A", steps: 2 }) // sec debates
-      .mockResolvedValueOnce({ text: "debate-B", steps: 2 }); // perf debates
+      .mockResolvedValueOnce({ text: "discuss-A", steps: 2 }) // sec discusses
+      .mockResolvedValueOnce({ text: "discuss-B", steps: 2 }); // perf discusses
     mockRunStructured.mockResolvedValue(sampleReview);
 
     await runAgenticReview(pr);
 
-    // 2 explore + 2 debate (one per agent) = 4 agent calls.
+    // 2 explore + 2 discussion (one per agent) = 4 agent calls.
     expect(mockRunAgent).toHaveBeenCalledTimes(4);
 
-    // 'sec' debate call should see perf's findings but be its own model.
-    const secDebate = mockRunAgent.mock.calls[2][0];
-    expect(secDebate.model).toEqual(expect.objectContaining({ id: "sec" }));
-    expect(secDebate.prompt).toContain("explore-B"); // sees the other's findings
-    expect(secDebate.prompt).toContain("explore-A"); // and its own previous
+    // 'sec' discussion call should see perf's findings but be its own model.
+    const secDiscuss = mockRunAgent.mock.calls[2][0];
+    expect(secDiscuss.model).toEqual(expect.objectContaining({ id: "sec" }));
+    expect(secDiscuss.prompt).toContain("explore-B"); // sees the other's findings
+    expect(secDiscuss.prompt).toContain("explore-A"); // and its own previous
 
-    // Synthesis sees the post-debate notes.
+    // Synthesis sees the post-discussion notes.
     const synthPrompt = mockRunStructured.mock.calls[0][0].prompt;
-    expect(synthPrompt).toContain("debate-A");
-    expect(synthPrompt).toContain("debate-B");
+    expect(synthPrompt).toContain("discuss-A");
+    expect(synthPrompt).toContain("discuss-B");
   });
 
-  test("honors AGENTIC_DEBATE_ROUNDS", async () => {
-    (config as any).agenticDebateRounds = 2;
+  test("honors AGENTIC_DISCUSSION_ROUNDS", async () => {
+    (config as any).agenticDiscussionRounds = 2;
     mockRunAgent.mockResolvedValue({ text: "notes", steps: 1 });
     mockRunStructured.mockResolvedValue(sampleReview);
 
@@ -224,7 +224,7 @@ describe("runAgenticReview - peer debate", () => {
     expect(mockRunAgent).toHaveBeenCalledTimes(6);
   });
 
-  test("a single agent does not debate (no peer)", async () => {
+  test("a single agent does not discuss (no peer)", async () => {
     (config as any).agents = [{ id: "solo", model: "m1" }];
     mockRunAgent.mockResolvedValue({ text: "notes", steps: 1 });
     mockRunStructured.mockResolvedValue(sampleReview);
@@ -234,19 +234,19 @@ describe("runAgenticReview - peer debate", () => {
     expect(mockRunAgent).toHaveBeenCalledTimes(1); // explore only
   });
 
-  test("an agent's debate failure keeps its prior position", async () => {
+  test("an agent's discussion failure keeps its prior position", async () => {
     mockRunAgent
       .mockResolvedValueOnce({ text: "explore-A", steps: 1 })
       .mockResolvedValueOnce({ text: "explore-B", steps: 1 })
-      .mockRejectedValueOnce(new Error("debate boom")) // sec debate fails
-      .mockResolvedValueOnce({ text: "debate-B", steps: 2 }); // perf debate ok
+      .mockRejectedValueOnce(new Error("discuss boom")) // sec discussion fails
+      .mockResolvedValueOnce({ text: "discuss-B", steps: 2 }); // perf discussion ok
     mockRunStructured.mockResolvedValue(sampleReview);
 
     const result = await runAgenticReview(pr);
 
     const synthPrompt = mockRunStructured.mock.calls[0][0].prompt;
     expect(synthPrompt).toContain("explore-A"); // sec fell back to its explore note
-    expect(synthPrompt).toContain("debate-B"); // perf updated
+    expect(synthPrompt).toContain("discuss-B"); // perf updated
     expect(result).toEqual(sampleReview);
   });
 });

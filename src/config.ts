@@ -1,7 +1,7 @@
 import { getInput, getMultilineInput } from "@actions/core";
 import { AIProviderType } from "./ai";
 
-export type ReviewStrategy = "parallel" | "debate";
+export type ReviewMode = "single" | "discussion";
 
 /**
  * A reviewer agent. `model` is required; `provider`/`baseUrl`/`apiKey` fall back
@@ -20,7 +20,7 @@ export type AgentSpec = {
 };
 
 const DEFAULT_AGENTIC_MAX_STEPS = 12;
-const DEFAULT_AGENTIC_DEBATE_ROUNDS = 1;
+const DEFAULT_AGENTIC_DISCUSSION_ROUNDS = 1;
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   const n = Number.parseInt(value || "", 10);
@@ -97,7 +97,7 @@ export function parseAgents(value: string | undefined): AgentSpec[] {
 }
 
 /**
- * Parse a single-agent setting (`SYNTHESIS_AGENT`, `DEBATE_AGENT`) into one
+ * Parse a single-agent setting (e.g. `SYNTHESIS_AGENT`) into one
  * {@link AgentSpec}. Accepts a JSON object or a bare model-name string. Returns
  * undefined when unset/blank so the role falls back to a default agent.
  */
@@ -133,9 +133,9 @@ export class Config {
   public agenticReview: boolean;
   public agents: AgentSpec[]; // explorer panel; empty -> use single llmModel
   public synthesisAgent?: AgentSpec; // judge that merges notes -> structured review
-  public reviewStrategy: ReviewStrategy;
+  public reviewMode: ReviewMode;
   public agenticMaxSteps: number;
-  public agenticDebateRounds: number; // peer-debate rounds when strategy=debate
+  public agenticDiscussionRounds: number; // peer-discussion rounds when mode=discussion
 
   public sapAiCoreClientId: string | undefined;
   public sapAiCoreClientSecret: string | undefined;
@@ -188,21 +188,22 @@ export class Config {
       process.env.SYNTHESIS_AGENT || getInput("synthesis_agent")
     );
 
-    const strategy = (
-      process.env.REVIEW_STRATEGY ||
-      getInput("review_strategy") ||
-      "parallel"
+    const mode = (
+      process.env.REVIEW_MODE ||
+      getInput("review_mode") ||
+      "single"
     ).toLowerCase();
-    this.reviewStrategy = strategy === "debate" ? "debate" : "parallel";
+    this.reviewMode = mode === "discussion" ? "discussion" : "single";
 
     this.agenticMaxSteps = parsePositiveInt(
       process.env.AGENTIC_MAX_STEPS || getInput("agentic_max_steps"),
       DEFAULT_AGENTIC_MAX_STEPS
     );
 
-    this.agenticDebateRounds = parsePositiveInt(
-      process.env.AGENTIC_DEBATE_ROUNDS || getInput("agentic_debate_rounds"),
-      DEFAULT_AGENTIC_DEBATE_ROUNDS
+    this.agenticDiscussionRounds = parsePositiveInt(
+      process.env.AGENTIC_DISCUSSION_ROUNDS ||
+        getInput("agentic_discussion_rounds"),
+      DEFAULT_AGENTIC_DISCUSSION_ROUNDS
     );
 
     // SAP AI Core configuration
@@ -281,9 +282,9 @@ export default process.env.NODE_ENV === "test"
       agenticReview: false,
       agents: [] as AgentSpec[],
       synthesisAgent: undefined as AgentSpec | undefined,
-      reviewStrategy: "parallel" as ReviewStrategy,
+      reviewMode: "single" as ReviewMode,
       agenticMaxSteps: DEFAULT_AGENTIC_MAX_STEPS,
-      agenticDebateRounds: DEFAULT_AGENTIC_DEBATE_ROUNDS,
+      agenticDiscussionRounds: DEFAULT_AGENTIC_DISCUSSION_ROUNDS,
       styleGuideRules: "",
       sapAiCoreClientId: "mock-client-id",
       sapAiCoreClientSecret: "mock-client-secret",

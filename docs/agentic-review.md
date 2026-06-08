@@ -3,8 +3,9 @@
 An opt-in, multi-agent, context-aware review mode for this action. It is
 **additive and off by default** — when disabled, the action behaves exactly as
 before (a single-shot review). When enabled, a panel of agents reads the repo
-with tools (files, rules, grep) before commenting, optionally debates each
-other, and a synthesis agent merges everything into the final inline comments.
+with tools (files, rules, grep) before commenting, optionally discusses each
+other's findings, and a synthesis agent merges everything into the final inline
+comments.
 
 > Requires `LLM_PROVIDER=ai-sdk` (the default). For any other provider the
 > action logs a warning and falls back to the standard single-shot review.
@@ -16,7 +17,7 @@ other, and a synthesis agent merges everything into the final inline comments.
 - [Quick start](#quick-start)
 - [Configuration reference](#configuration-reference)
 - [Agent spec format](#agent-spec-format)
-- [Pipeline & strategies](#pipeline--strategies)
+- [Pipeline & modes](#pipeline--modes)
 - [What each agent can access](#what-each-agent-can-access)
 - [Prompt composition & instruction usage](#prompt-composition--instruction-usage)
 - [Cost & latency](#cost--latency)
@@ -41,11 +42,11 @@ Single agent, agentic (reads repo context before commenting):
     AGENTIC_REVIEW: "true"
 ```
 
-A panel of two agents that debate:
+A panel of two agents that discuss:
 
 ```yaml
     AGENTIC_REVIEW: "true"
-    REVIEW_STRATEGY: debate
+    REVIEW_MODE: discussion
     AGENTS: "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro"
 ```
 
@@ -61,8 +62,8 @@ input** (lower-cased name). All are optional except where noted.
 | `AGENTIC_REVIEW` | `agentic_review` | bool | `false` | Master switch. `false` = standard single-shot review. |
 | `AGENTS` | `agents` | agent list | _(empty)_ | The explorer panel. When set, **overrides `LLM_MODEL`**. When empty, the single `LLM_MODEL` is used. |
 | `SYNTHESIS_AGENT` | `synthesis_agent` | single agent | `LLM_MODEL` | The judge that merges findings into the final structured review. Independent config; does **not** reuse an explorer agent. |
-| `REVIEW_STRATEGY` | `review_strategy` | `parallel` \| `debate` | `parallel` | `parallel` = independent reviews merged by synthesis. `debate` = the panel critiques each other first. |
-| `AGENTIC_DEBATE_ROUNDS` | `agentic_debate_rounds` | int > 0 | `1` | Peer-debate rounds when `REVIEW_STRATEGY=debate`. |
+| `REVIEW_MODE` | `review_mode` | `single` \| `discussion` | `single` | `single` = explore → synthesize. `discussion` = the panel critiques each other first (needs 2+ agents). |
+| `AGENTIC_DISCUSSION_ROUNDS` | `agentic_discussion_rounds` | int > 0 | `1` | Peer-discussion rounds when `REVIEW_MODE=discussion`. |
 | `AGENTIC_MAX_STEPS` | `agentic_max_steps` | int > 0 | `12` | Max tool-use steps per agent per call. |
 
 Built on the existing base settings (used as fallbacks for every agent):
@@ -73,9 +74,9 @@ Built on the existing base settings (used as fallbacks for every agent):
 | `LLM_MODEL` | Required. The base model — used when `AGENTS` is empty, and as the default for `SYNTHESIS_AGENT`. |
 | `LLM_API_KEY` | Default API key for every agent. |
 | `LLM_BASE_URL` | Default base URL (e.g. OpenRouter) for every agent. |
-| `STYLE_GUIDE_RULES` / `style_guide_rules` | Extra rules injected directly into the explore/debate prompts. |
+| `STYLE_GUIDE_RULES` / `style_guide_rules` | Extra rules injected directly into the explore/discussion prompts. |
 
-> **Model requirement:** because the explore/debate phases use tool calling,
+> **Model requirement:** because the explore/discussion phases use tool calling,
 > each agent's model must support function/tool calling (Claude, GPT-4o/4.1/5,
 > Gemini 2.x, DeepSeek v4, Kimi k2, etc.).
 
@@ -122,7 +123,7 @@ SYNTHESIS_AGENT: '{"id":"judge","model":"openai/gpt-5","instructions":"Be conser
 | Field | Required | Default | Notes |
 |---|---|---|---|
 | `model` | ✅ | — | Model id (e.g. `anthropic/claude-sonnet-4.5`). |
-| `id` | — | the `model` | Label used in logs, debate references, and synthesis attribution. |
+| `id` | — | the `model` | Label used in logs, discussion references, and synthesis attribution. |
 | `instructions` | — | _(none)_ | Focus/persona appended to that agent's prompt (see [instruction usage](#prompt-composition--instruction-usage)). |
 | `provider` | — | `LLM_PROVIDER` | Must resolve to `ai-sdk`. |
 | `baseUrl` | — | `LLM_BASE_URL` | Per-agent endpoint (mix providers across the panel). |
@@ -134,13 +135,13 @@ the default for `SYNTHESIS_AGENT`). `AGENTS` empty ⇒ a single agent built from
 
 ---
 
-## Pipeline & strategies
+## Pipeline & modes
 
-Every agentic run is **explore → [debate] → synthesize**. Tools are available
-during explore and debate (not synthesis).
+Every agentic run is **explore → [discuss] → synthesize**. Tools are available
+during explore and discussion (not synthesis).
 
 ```
-   tools available to explore/debate agents:
+   tools available to explore/discussion agents:
    ┌────────────────┬───────────────────────────────────────────┐
    │ list_guidelines │ CLAUDE.md, AGENTS.md, .claude/rules, skills │
    │ read_file       │ surrounding code / definitions / callers    │
@@ -157,10 +158,10 @@ during explore and debate (not synthesis).
         └───────────────────────────┘   └─────────────────────┘
 ```
 
-### `REVIEW_STRATEGY=parallel` — independent panel, then merge
+### `REVIEW_MODE=single` — panel reviews, then merge
 
 ```
-                 ┌─ EXPLORE (parallel) ──────────┐
+                 ┌─ EXPLORE (concurrent) ─────────┐
             ┌───▶│  ┌────────────────────────┐   │──┐ notes_A
             │    │  │ "security"   (model A) │   │  │
  PR ───────▶┤    │  │ + tools, own focus     │   │  │      ┌─ SYNTHESIZE ──────┐
@@ -173,10 +174,10 @@ during explore and debate (not synthesis).
    agents never see each other's work · cheapest multi-agent · broad coverage
 ```
 
-### `REVIEW_STRATEGY=debate` — panel critiques EACH OTHER, then merge
+### `REVIEW_MODE=discussion` — panel critiques EACH OTHER, then merge
 
 ```
-   ┌─ EXPLORE (parallel) ─┐   ┌─ DEBATE · R rounds (parallel each round) ──────────┐   ┌─ SYNTHESIZE ─────┐
+   ┌─ EXPLORE (concurrent)┐   ┌─ DISCUSS · R rounds (concurrent each round) ───────┐   ┌─ SYNTHESIZE ─────┐
 A: │ "security"  ─notes_A─┼──▶│  A sees {B}  ─▶ agree / refute(verify) / add ─▶ A' │──▶│ SYNTHESIS_AGENT  │
    │ + tools, focus       │   │            ╲ ╱   keeps A's own model+persona       │   │ weight by        │──▶ comments
  PR│                      │   │             ╳                                      │   │ cross-agent      │
@@ -188,33 +189,34 @@ B: │ "correctness"─notes_B┼──▶│  B sees {A}  ─▶ agree / refute
                                  skipped if < 2 agents · "do NOT rubber-stamp"
 ```
 
-One debate round in close-up — the cross is the point (every agent reads every
-*other* agent):
+One discussion round in close-up — the cross is the point (every agent reads
+every *other* agent):
 
 ```
         round r input = all agents' notes from round r-1
                  │
      ┌───────────┼───────────┐
      ▼           ▼           ▼
-  agent A     agent B     agent C        ← run in parallel
+  agent A     agent B     agent C        ← run concurrently
   reads B,C   reads A,C   reads A,B      ← each sees the OTHERS
      │           │           │
      ▼           ▼           ▼
     A'          B'          C'           ← revised positions → round r+1 (or synthesize)
 ```
 
-### Strategy comparison
+### Mode comparison
 
-| | parallel | debate |
+| | single | discussion |
 |---|---|---|
 | agents see each other's findings | ❌ | ✅ (the panel, not an external critic) |
 | who critiques | nobody (just merged) | the agents critique **each other** |
-| extra tool-using passes | none | `N × AGENTIC_DEBATE_ROUNDS` |
+| extra tool-using passes | none | `N × AGENTIC_DISCUSSION_ROUNDS` |
+| needs | 1+ agents | 2+ agents |
 | best at | coverage, low cost | precision — killing false positives, filling gaps |
 | guardrail | — | anti-sycophancy prompt + tool verification |
 
-**Mental model:** *parallel* = independent reports stapled together by an
-editor. *debate* = the same reviewers argue it out (refute weak claims, defend
+**Mental model:** *single* = independent reports stapled together by an editor.
+*discussion* = the same reviewers argue it out (refute weak claims, defend
 strong ones, surface what others missed), then the editor finalizes.
 
 ---
@@ -224,11 +226,11 @@ strong ones, surface what others missed), then the editor finalizes.
 | | Code changes (diff) | Code **outside** the diff | Repo rules (CLAUDE.md / AGENTS.md / .claude/rules / skills) | `style_guide_rules` |
 |---|---|---|---|---|
 | **Explore agents** | ✅ in prompt | ✅ via `read_file` + `grep` | ✅ via `list_guidelines` tool ("ALWAYS call first") | ✅ in prompt |
-| **Debate agents** | ✅ in prompt | ✅ via tools | ✅ via `list_guidelines` tool | ✅ in prompt |
+| **Discussion agents** | ✅ in prompt | ✅ via tools | ✅ via `list_guidelines` tool | ✅ in prompt |
 | **Synthesis agent** | ✅ in prompt | ❌ no tools | ❌ only via the explorers' notes | ❌ not in its prompt |
 
 ```
- EXPLORE / DEBATE agent gets:                    SYNTHESIS agent gets:
+ EXPLORE / DISCUSS agent gets:                   SYNTHESIS agent gets:
  ┌─────────────────────────────┐                ┌─────────────────────────────┐
  │ • PR diff           (prompt) │                │ • PR diff          (prompt) │
  │ • style_guide_rules (prompt) │                │ • all agents' notes(prompt) │
@@ -256,7 +258,7 @@ consistent while each agent can specialize:
 
 ```
    [ base review prompt ]   role + tools + output contract   (constant)
- + [ phase instruction  ]   explore | debate | synthesize    (per phase)
+ + [ phase instruction  ]   explore | discuss | synthesize   (per phase)
  + [ <Your Focus> block ]   the agent's own `instructions`    (per agent)
 ```
 
@@ -287,8 +289,8 @@ Agent:
   "instructions": "Focus on security: injection, authz, secrets, SSRF. Ignore style." }
 ```
 
-Appended to its system prompt (in **both** explore and debate, since debate
-reuses the base prompt):
+Appended to its system prompt (in **both** explore and discussion, since
+discussion reuses the base prompt):
 
 ```
 <Your Focus>
@@ -296,11 +298,11 @@ Focus on security: injection, authz, secrets, SSRF. Ignore style.
 </Your Focus>
 ```
 
-So with `AGENTS = [security, correctness]` and `REVIEW_STRATEGY=debate`:
+So with `AGENTS = [security, correctness]` and `REVIEW_MODE=discussion`:
 
 ```
-security agent    = base + <Focus: security…>   → explores, then debates correctness (still security-lens)
-correctness agent = base + <Focus: logic bugs…> → explores, then debates security (still logic-lens)
+security agent    = base + <Focus: security…>   → explores, then discusses correctness (still security-lens)
+correctness agent = base + <Focus: logic bugs…> → explores, then discusses security (still logic-lens)
 synthesis agent   = synthesis prompt + <Focus: …if SYNTHESIS_AGENT.instructions set>
 ```
 
@@ -310,10 +312,10 @@ keep only high-confidence findings").
 
 ### The phase instructions (verbatim)
 
-**Debate** (appended to the base prompt):
+**Discussion** (appended to the base prompt):
 
 ```
-You are now in a DEBATE with the other reviewers. Critically evaluate their
+You are now in a DISCUSSION with the other reviewers. Critically evaluate their
 findings — do NOT rubber-stamp them. For each of their findings: AGREE only if
 you can confirm it (verify with read_file/grep), REFUTE it with a concrete
 reason if you believe it is wrong or a false positive, and ADD any issues
@@ -336,18 +338,18 @@ correctly refuted. Output your updated findings in the same notes format.
 
 ## Cost & latency
 
-Roughly, number of LLM calls (N = panel size, R = debate rounds):
+Roughly, number of LLM calls (N = panel size, R = discussion rounds):
 
-| Strategy | LLM calls |
+| Mode | LLM calls |
 |---|---|
 | single agent | `1 explore + 1 synthesis` |
-| parallel | `N explore + 1 synthesis` |
-| debate | `N explore + (N × R) debate + 1 synthesis` |
+| `single` (N agents) | `N explore + 1 synthesis` |
+| `discussion` (N agents) | `N explore + (N × R) discussion + 1 synthesis` |
 
-Each explore/debate call may internally loop up to `AGENTIC_MAX_STEPS` tool
-steps. Multiple agents and debate rounds multiply tokens and wall-clock on
-**every PR** — start with one or two agents and 1 debate round, and use cheaper
-models for explorers if needed.
+Each explore/discussion call may internally loop up to `AGENTIC_MAX_STEPS` tool
+steps. Multiple agents and discussion rounds multiply tokens and wall-clock on
+**every PR** — start with one or two agents and 1 discussion round, and use
+cheaper models for explorers if needed.
 
 ---
 
@@ -356,9 +358,9 @@ models for explorers if needed.
 - **An explorer fails** → its findings are dropped; synthesis proceeds with the
   survivors.
 - **All explorers fail** → an empty review is returned (no synthesis call).
-- **A debate call fails** → that agent keeps its pre-debate position for the
-  round.
-- **Single agent + `debate`** → debate is skipped (no peer to debate).
+- **A discussion call fails** → that agent keeps its pre-discussion position for
+  the round.
+- **Single agent + `discussion`** → discussion is skipped (no peer).
 - **Non-`ai-sdk` provider + `AGENTIC_REVIEW=true`** → warning + fallback to the
   standard single-shot review.
 
@@ -366,7 +368,7 @@ models for explorers if needed.
 
 ## Full examples
 
-**Parallel panel, mixed providers, custom synthesis model:**
+**Single mode, panel of two, mixed providers, custom synthesis model:**
 
 ```yaml
 - uses: actions/checkout@v4
@@ -378,7 +380,7 @@ models for explorers if needed.
     LLM_BASE_URL: https://openrouter.ai/api/v1
     LLM_MODEL: deepseek/deepseek-v4-flash       # base + synthesis default
     AGENTIC_REVIEW: "true"
-    REVIEW_STRATEGY: parallel
+    REVIEW_MODE: single
     AGENTS: >-
       [
         {"id":"security","model":"anthropic/claude-sonnet-4.5","instructions":"Focus on security and input validation."},
@@ -387,12 +389,12 @@ models for explorers if needed.
     SYNTHESIS_AGENT: "openai/gpt-5"
 ```
 
-**Debate, two rounds:**
+**Discussion, two rounds:**
 
 ```yaml
     AGENTIC_REVIEW: "true"
-    REVIEW_STRATEGY: debate
-    AGENTIC_DEBATE_ROUNDS: "2"
+    REVIEW_MODE: discussion
+    AGENTIC_DISCUSSION_ROUNDS: "2"
     AGENTS: "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro, openai/gpt-5"
 ```
 
