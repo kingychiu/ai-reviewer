@@ -1,4 +1,4 @@
-import { Config } from '../config';
+import { Config, parseAgents, parseAgent } from '../config';
 import * as core from '@actions/core';
 
 // Create manual mocks for core functions
@@ -161,5 +161,218 @@ describe('Config', () => {
     const config = new Config();
 
     expect(config.llmBaseUrl).toBe('https://anyscale.com/api/v1');
+  });
+
+  describe('agentic review settings', () => {
+    beforeEach(() => {
+      process.env.GITHUB_TOKEN = 'test-token';
+      process.env.LLM_API_KEY = 'test-api-key';
+      process.env.LLM_MODEL = 'test-model';
+    });
+
+    test('agenticReview defaults to false and agents to empty', () => {
+      const config = new Config();
+      expect(config.agenticReview).toBe(false);
+      expect(config.agents).toEqual([]);
+      expect(config.synthesisAgent).toBeUndefined();
+      expect(config.agenticMaxSteps).toBe(12);
+      expect(config.agenticDiscussionRounds).toBe(2);
+    });
+
+    test('agenticReview parses truthy env values', () => {
+      process.env.AGENTIC_REVIEW = 'true';
+      expect(new Config().agenticReview).toBe(true);
+
+      process.env.AGENTIC_REVIEW = '1';
+      expect(new Config().agenticReview).toBe(true);
+
+      process.env.AGENTIC_REVIEW = 'false';
+      expect(new Config().agenticReview).toBe(false);
+    });
+
+    test('agenticMaxSteps parses positive ints and ignores junk', () => {
+      process.env.AGENTIC_MAX_STEPS = '20';
+      expect(new Config().agenticMaxSteps).toBe(20);
+
+      process.env.AGENTIC_MAX_STEPS = '-5';
+      expect(new Config().agenticMaxSteps).toBe(12);
+
+      process.env.AGENTIC_MAX_STEPS = 'abc';
+      expect(new Config().agenticMaxSteps).toBe(12);
+      delete process.env.AGENTIC_MAX_STEPS;
+    });
+
+    test('parses AGENTS as a comma-separated list (id defaults to model)', () => {
+      process.env.AGENTS =
+        'anthropic/claude-sonnet-4.5, google/gemini-2.5-pro';
+      const config = new Config();
+      expect(config.agents).toEqual([
+        { id: 'anthropic/claude-sonnet-4.5', model: 'anthropic/claude-sonnet-4.5' },
+        { id: 'google/gemini-2.5-pro', model: 'google/gemini-2.5-pro' },
+      ]);
+      delete process.env.AGENTS;
+    });
+
+    test('parses AGENTS as JSON with id, instructions, provider, base URL', () => {
+      process.env.AGENTS = JSON.stringify([
+        {
+          id: 'security',
+          model: 'anthropic/claude-sonnet-4.5',
+          instructions: 'Focus on security.',
+          provider: 'ai-sdk',
+          baseUrl: 'https://openrouter.ai/api/v1',
+        },
+        'google/gemini-2.5-pro',
+      ]);
+      const config = new Config();
+      expect(config.agents).toEqual([
+        {
+          id: 'security',
+          model: 'anthropic/claude-sonnet-4.5',
+          instructions: 'Focus on security.',
+          provider: 'ai-sdk',
+          baseUrl: 'https://openrouter.ai/api/v1',
+          apiKey: undefined,
+        },
+        { id: 'google/gemini-2.5-pro', model: 'google/gemini-2.5-pro' },
+      ]);
+      delete process.env.AGENTS;
+    });
+
+    test('parses SYNTHESIS_AGENT (object and bare string)', () => {
+      process.env.SYNTHESIS_AGENT = JSON.stringify({
+        id: 'judge',
+        model: 'openai/gpt-5',
+        instructions: 'Be conservative.',
+      });
+      const config = new Config();
+      expect(config.synthesisAgent).toEqual({
+        id: 'judge',
+        model: 'openai/gpt-5',
+        instructions: 'Be conservative.',
+        provider: undefined,
+        baseUrl: undefined,
+        apiKey: undefined,
+      });
+      delete process.env.SYNTHESIS_AGENT;
+    });
+
+    test('LLM_MODEL and LLM_API_KEY are optional in multi-agent agentic mode', () => {
+      process.env.LLM_MODEL = '';
+      process.env.LLM_API_KEY = '';
+      process.env.AGENTIC_REVIEW = 'true';
+      process.env.AGENTS = 'deepseek/deepseek-v4-flash, moonshotai/kimi-k2.6';
+
+      expect(() => new Config()).not.toThrow();
+      const config = new Config();
+      expect(config.agents.map((a) => a.model)).toEqual([
+        'deepseek/deepseek-v4-flash',
+        'moonshotai/kimi-k2.6',
+      ]);
+
+      delete process.env.AGENTIC_REVIEW;
+      delete process.env.AGENTS;
+    });
+
+    test('LLM_MODEL still required when agentic review has no AGENTS', () => {
+      process.env.LLM_MODEL = '';
+      process.env.LLM_API_KEY = 'k';
+      process.env.AGENTIC_REVIEW = 'true';
+
+      expect(() => new Config()).toThrow('LLM_MODEL is not set');
+
+      delete process.env.AGENTIC_REVIEW;
+    });
+
+    test('parses AGENTIC_DISCUSSION_ROUNDS, ignoring junk (default 2)', () => {
+      process.env.AGENTIC_DISCUSSION_ROUNDS = '3';
+      expect(new Config().agenticDiscussionRounds).toBe(3);
+
+      process.env.AGENTIC_DISCUSSION_ROUNDS = '0';
+      expect(new Config().agenticDiscussionRounds).toBe(2);
+
+      process.env.AGENTIC_DISCUSSION_ROUNDS = 'abc';
+      expect(new Config().agenticDiscussionRounds).toBe(2);
+      delete process.env.AGENTIC_DISCUSSION_ROUNDS;
+    });
+  });
+});
+
+describe('parseAgents', () => {
+  test('returns empty array for unset/blank input', () => {
+    expect(parseAgents(undefined)).toEqual([]);
+    expect(parseAgents('')).toEqual([]);
+    expect(parseAgents('   ')).toEqual([]);
+  });
+
+  test('parses comma-separated names with id defaulting to model', () => {
+    expect(parseAgents('a, b ,c')).toEqual([
+      { id: 'a', model: 'a' },
+      { id: 'b', model: 'b' },
+      { id: 'c', model: 'c' },
+    ]);
+  });
+
+  test('parses JSON objects and bare strings', () => {
+    expect(parseAgents('[{"id":"x","model":"m","provider":"ai-sdk"}, "y"]')).toEqual([
+      {
+        id: 'x',
+        model: 'm',
+        instructions: undefined,
+        provider: 'ai-sdk',
+        baseUrl: undefined,
+        apiKeyEnv: undefined,
+      },
+      { id: 'y', model: 'y' },
+    ]);
+  });
+
+  test('parses apiKeyEnv (secret env name, not a raw key)', () => {
+    const agents = parseAgents(
+      '[{"model":"anthropic/claude-sonnet-4.5","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY"}]'
+    );
+    expect(agents[0]).toMatchObject({
+      id: 'anthropic/claude-sonnet-4.5',
+      model: 'anthropic/claude-sonnet-4.5',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKeyEnv: 'OPENROUTER_API_KEY',
+    });
+  });
+
+  test('drops entries without a model and handles bad json', () => {
+    expect(parseAgents('[{"id":"no-model"}, "ok"]')).toEqual([
+      { id: 'ok', model: 'ok' },
+    ]);
+    expect(parseAgents('[not valid json')).toEqual([]);
+  });
+});
+
+describe('parseAgent', () => {
+  test('returns undefined for unset/blank', () => {
+    expect(parseAgent(undefined)).toBeUndefined();
+    expect(parseAgent('   ')).toBeUndefined();
+  });
+
+  test('parses a bare model name', () => {
+    expect(parseAgent('openai/gpt-5')).toEqual({
+      id: 'openai/gpt-5',
+      model: 'openai/gpt-5',
+    });
+  });
+
+  test('parses a JSON object', () => {
+    expect(parseAgent('{"id":"judge","model":"m","instructions":"x"}')).toEqual({
+      id: 'judge',
+      model: 'm',
+      instructions: 'x',
+      provider: undefined,
+      baseUrl: undefined,
+      apiKey: undefined,
+    });
+  });
+
+  test('returns undefined for object without model / bad json', () => {
+    expect(parseAgent('{"id":"no-model"}')).toBeUndefined();
+    expect(parseAgent('{bad json')).toBeUndefined();
   });
 });

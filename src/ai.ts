@@ -1,8 +1,9 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
+import { generateText, generateObject, type CoreTool } from "ai";
 import { z } from "zod";
-import config from "./config";
+import config, { type AgentSpec } from "./config";
 import { AISDKProvider } from "./providers/ai-sdk";
 import { SAPAIProvider } from "./providers/sapaicore";
 
@@ -294,4 +295,142 @@ export async function runPrompt({
     system: systemPrompt,
     schema,
   });
+}
+
+// ===== Agentic review support (additive; used only by src/agentic) =====
+//
+// Resolves an AI SDK language model for a single agent, reusing the same
+// allowlist + LLM_BASE_URL fallback rules as runPrompt above. Unknown models
+// are allowed through the OpenAI-compatible client when a base URL is set
+// (e.g. OpenRouter), otherwise they error with the supported-model list.
+function createAiSdkLanguageModel(spec: {
+  model: string;
+  baseUrl?: string;
+  apiKey?: string;
+}) {
+  const modelName = spec.model;
+  const baseUrl = spec.baseUrl ?? config.llmBaseUrl;
+  const apiKey = spec.apiKey ?? config.llmApiKey;
+
+  const providerModels = LLM_MODELS[AIProviderType.AI_SDK];
+  let modelConfig = providerModels.find((m) => m.name === modelName);
+
+  // When using a custom base URL, skip whitelist validation and use OpenAI SDK.
+  if (!modelConfig && baseUrl) {
+    modelConfig = { name: modelName, createAi: createOpenAI };
+  }
+
+  if (!modelConfig || !modelConfig.createAi) {
+    throw new Error(
+      `Unknown LLM model: ${modelName}. Set LLM_BASE_URL for OpenAI-compatible ` +
+        `providers (e.g. OpenRouter), or use one of: ` +
+        `${providerModels.map((m) => m.name).join(", ")}`
+    );
+  }
+
+  const provider = modelConfig.createAi({
+    apiKey,
+    ...(baseUrl && { baseURL: baseUrl }),
+  });
+  return provider(modelName);
+}
+
+// Validate an agent is usable for an agentic (ai-sdk) call and return its
+// resolved {model, baseUrl, apiKey}. Throws on non-ai-sdk providers / no model.
+// API key resolution: env[apiKeyEnv] -> top-level LLM_API_KEY. Raw keys are not
+// accepted in the agent spec (so secrets never live in the AGENTS config).
+function resolveAgent(agent?: AgentSpec): {
+  model: string;
+  baseUrl?: string;
+  apiKey?: string;
+} {
+  const provider = agent?.provider ?? config.llmProvider;
+  if (provider !== AIProviderType.AI_SDK) {
+    throw new Error(
+      `Agentic review requires the '${AIProviderType.AI_SDK}' provider ` +
+        `(got '${provider}'). Set LLM_PROVIDER=ai-sdk.`
+    );
+  }
+  const model = agent?.model ?? config.llmModel ?? "";
+  if (!model) {
+    throw new Error("No model configured for agentic review");
+  }
+
+  let apiKey: string | undefined;
+  if (agent?.apiKeyEnv) {
+    apiKey = process.env[agent.apiKeyEnv];
+    if (!apiKey) {
+      console.warn(
+        `Agent '${agent.id}': apiKeyEnv '${agent.apiKeyEnv}' is not set in the environment.`
+      );
+    }
+  }
+  apiKey = apiKey ?? config.llmApiKey;
+
+  return { model, baseUrl: agent?.baseUrl, apiKey };
+}
+
+export type RunAgentResult = {
+  text: string;
+  steps: number;
+};
+
+/**
+ * Run a tool-using agent loop with the AI SDK (generateText + maxSteps).
+ *
+ * Additive, used only by the opt-in agentic reviewer. Accepts a per-call
+ * AgentSpec so a multi-agent review can run several models, each with its own
+ * provider/base URL/API key. Only the `ai-sdk` provider is supported.
+ */
+export async function runAgent({
+  systemPrompt,
+  prompt,
+  tools,
+  maxSteps,
+  model,
+}: {
+  systemPrompt: string;
+  prompt: string;
+  tools: Record<string, CoreTool>;
+  maxSteps?: number;
+  model?: AgentSpec;
+}): Promise<RunAgentResult> {
+  const llm = createAiSdkLanguageModel(resolveAgent(model));
+  const result = await generateText({
+    model: llm,
+    system: systemPrompt,
+    prompt,
+    tools,
+    maxSteps: maxSteps ?? 12,
+    temperature: 0,
+  });
+
+  return { text: result.text, steps: result.steps?.length ?? 0 };
+}
+
+/**
+ * Structured (generateObject) call with a chosen agent model. Used by the
+ * agentic synthesis step so the judge can run a different model than the
+ * explorers. Only the `ai-sdk` provider is supported.
+ */
+export async function runStructured({
+  systemPrompt,
+  prompt,
+  schema,
+  model,
+}: {
+  systemPrompt: string;
+  prompt: string;
+  schema: z.ZodObject<any, any>;
+  model?: AgentSpec;
+}): Promise<any> {
+  const llm = createAiSdkLanguageModel(resolveAgent(model));
+  const { object } = await generateObject({
+    model: llm,
+    system: systemPrompt,
+    prompt,
+    schema,
+    temperature: 0,
+  });
+  return object;
 }

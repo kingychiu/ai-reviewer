@@ -1,6 +1,125 @@
 import { getInput, getMultilineInput } from "@actions/core";
 import { AIProviderType } from "./ai";
 
+/**
+ * A reviewer agent. `model` is required; `provider`/`baseUrl`/`apiKey` fall back
+ * to the top-level `llmProvider` / `llmBaseUrl` / `llmApiKey` when omitted, so a
+ * single agent can be just a model name while another points at a completely
+ * different provider/endpoint. `id` is a human label (logs, attribution) and
+ * `instructions` is an optional focus/persona appended to that agent's prompt.
+ *
+ * Keys: use `apiKeyEnv` — the NAME of an environment variable holding the key
+ * (e.g. "OPENROUTER_API_KEY") — so a panel can span platforms/billing without
+ * putting raw secrets in the AGENTS config. Raw keys are intentionally not
+ * accepted here. Resolution: env[apiKeyEnv] -> top-level LLM_API_KEY.
+ */
+export type AgentSpec = {
+  id: string;
+  model: string;
+  instructions?: string;
+  provider?: string;
+  baseUrl?: string;
+  apiKeyEnv?: string;
+};
+
+const DEFAULT_AGENTIC_MAX_STEPS = 12;
+const DEFAULT_AGENTIC_DISCUSSION_ROUNDS = 2;
+
+function parsePositiveInt(value: string | undefined, fallback: number): number {
+  const n = Number.parseInt(value || "", 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
+function parseBool(value: string | undefined): boolean {
+  return value === "1" || value?.toLowerCase() === "true";
+}
+
+function str(v: unknown): string | undefined {
+  return typeof v === "string" && v.trim() ? v.trim() : undefined;
+}
+
+/** Normalize one parsed entry (object or bare model string) into an AgentSpec. */
+function toAgentSpec(entry: unknown): AgentSpec | null {
+  if (typeof entry === "string") {
+    const model = entry.trim();
+    return model ? { id: model, model } : null;
+  }
+  if (entry && typeof entry === "object") {
+    const e = entry as Record<string, unknown>;
+    const model = str(e.model);
+    if (!model) return null;
+    return {
+      id: str(e.id) ?? model,
+      model,
+      instructions: str(e.instructions),
+      provider: str(e.provider),
+      baseUrl: str(e.baseUrl),
+      apiKeyEnv: str(e.apiKeyEnv),
+    };
+  }
+  return null;
+}
+
+/**
+ * Parse the `AGENTS` setting into a list of {@link AgentSpec}.
+ *
+ * Two accepted forms:
+ *  - JSON array of objects/strings:
+ *      [{"id":"security","model":"anthropic/claude-sonnet-4.5","instructions":"..."}, "google/gemini-2.5-pro"]
+ *  - Convenience comma-separated model names (id defaults to the model):
+ *      anthropic/claude-sonnet-4.5, google/gemini-2.5-pro
+ *
+ * Returns an empty array when unset/blank so the single `llmModel` takes effect.
+ */
+export function parseAgents(value: string | undefined): AgentSpec[] {
+  const raw = (value ?? "").trim();
+  if (!raw) {
+    return [];
+  }
+
+  if (raw.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed
+        .map(toAgentSpec)
+        .filter((a): a is AgentSpec => a !== null);
+    } catch (e) {
+      console.error("Error parsing AGENTS as JSON:", e);
+      return [];
+    }
+  }
+
+  return raw
+    .split(",")
+    .map((m) => m.trim())
+    .filter((m) => m.length > 0)
+    .map((model) => ({ id: model, model }));
+}
+
+/**
+ * Parse a single-agent setting (e.g. `SYNTHESIS_AGENT`) into one
+ * {@link AgentSpec}. Accepts a JSON object or a bare model-name string. Returns
+ * undefined when unset/blank so the role falls back to a default agent.
+ */
+export function parseAgent(value: string | undefined): AgentSpec | undefined {
+  const raw = (value ?? "").trim();
+  if (!raw) {
+    return undefined;
+  }
+  if (raw.startsWith("{")) {
+    try {
+      return toAgentSpec(JSON.parse(raw)) ?? undefined;
+    } catch (e) {
+      console.error("Error parsing single agent as JSON:", e);
+      return undefined;
+    }
+  }
+  return { id: raw, model: raw };
+}
+
 export class Config {
   public llmApiKey: string | undefined;
   public llmModel: string | undefined;
@@ -10,6 +129,15 @@ export class Config {
   public styleGuideRules: string | undefined;
   public githubApiUrl: string;
   public githubServerUrl: string;
+
+  // Agentic review (opt-in, default off). When enabled, the reviewer reads the
+  // diff with repo-context tools (files, CLAUDE.md/AGENTS.md/rules/skills) before
+  // commenting, and can run a panel of agents together. See src/agentic/.
+  public agenticReview: boolean;
+  public agents: AgentSpec[]; // explorer panel; empty -> use single llmModel
+  public synthesisAgent?: AgentSpec; // judge that merges notes -> structured review
+  public agenticMaxSteps: number;
+  public agenticDiscussionRounds: number; // peer-discussion rounds when 2+ agents
 
   public sapAiCoreClientId: string | undefined;
   public sapAiCoreClientSecret: string | undefined;
@@ -23,27 +151,58 @@ export class Config {
       throw new Error("GITHUB_TOKEN is not set");
     }
 
-    this.llmModel = process.env.LLM_MODEL || getInput("llm_model");
-    if (!this.llmModel?.length) {
-      throw new Error("LLM_MODEL is not set");
-    }
-
+    // Top-level provider/base URL/key are the single-model defaults and the
+    // per-agent fallbacks. In multi-agent agentic mode each agent self-describes
+    // (model + provider + baseUrl + key), so these may be left unset.
     this.llmProvider = process.env.LLM_PROVIDER || getInput("llm_provider");
     if (!this.llmProvider?.length) {
       this.llmProvider = AIProviderType.AI_SDK;
-      console.log(`Using default LLM_PROVIDER '${this.llmProvider}'`);
     }
-
     this.llmApiKey = process.env.LLM_API_KEY;
-    const isSapAiSdk = this.llmProvider === AIProviderType.SAP_AI_SDK;
-    // SAP AI SDK does not require an API key
-    if (!this.llmApiKey && !isSapAiSdk) {
-      throw new Error("LLM_API_KEY is not set");
-    }
-
     const baseUrlFromEnv = process.env.LLM_BASE_URL;
     const baseUrlFromInput = getInput("llm_base_url");
     this.llmBaseUrl = baseUrlFromEnv || baseUrlFromInput || undefined;
+    this.llmModel = process.env.LLM_MODEL || getInput("llm_model");
+
+    // Agentic review configuration (all optional, default to the existing
+    // single-shot behavior when unset).
+    this.agenticReview = parseBool(
+      process.env.AGENTIC_REVIEW || getInput("agentic_review")
+    );
+
+    // Explorer panel. Empty by default: when no agents are given, the single
+    // `llmModel` takes effect. When non-empty, `agents` takes precedence and
+    // each agent self-describes its model/provider/baseUrl/key.
+    this.agents = parseAgents(process.env.AGENTS || getInput("agents"));
+
+    // Synthesis (judge) agent (optional). Falls back to llmModel, else the first
+    // agent, in the orchestrator when unset.
+    this.synthesisAgent = parseAgent(
+      process.env.SYNTHESIS_AGENT || getInput("synthesis_agent")
+    );
+
+    // When the agentic reviewer runs with its own panel, the top-level
+    // LLM_MODEL / LLM_API_KEY are not required (each agent self-describes).
+    const agenticMultiAgent = this.agenticReview && this.agents.length > 0;
+    const isSapAiSdk = this.llmProvider === AIProviderType.SAP_AI_SDK;
+    if (!this.llmModel?.length && !agenticMultiAgent) {
+      throw new Error("LLM_MODEL is not set");
+    }
+    // SAP AI SDK does not require an API key.
+    if (!this.llmApiKey && !isSapAiSdk && !agenticMultiAgent) {
+      throw new Error("LLM_API_KEY is not set");
+    }
+
+    this.agenticMaxSteps = parsePositiveInt(
+      process.env.AGENTIC_MAX_STEPS || getInput("agentic_max_steps"),
+      DEFAULT_AGENTIC_MAX_STEPS
+    );
+
+    this.agenticDiscussionRounds = parsePositiveInt(
+      process.env.AGENTIC_DISCUSSION_ROUNDS ||
+        getInput("agentic_discussion_rounds"),
+      DEFAULT_AGENTIC_DISCUSSION_ROUNDS
+    );
 
     // SAP AI Core configuration
     this.sapAiCoreClientId = process.env.SAP_AI_CORE_CLIENT_ID;
@@ -118,6 +277,11 @@ export default process.env.NODE_ENV === "test"
       llmModel: "mock-model",
       llmProvider: "mock-provider",
       llmBaseUrl: undefined,
+      agenticReview: false,
+      agents: [] as AgentSpec[],
+      synthesisAgent: undefined as AgentSpec | undefined,
+      agenticMaxSteps: DEFAULT_AGENTIC_MAX_STEPS,
+      agenticDiscussionRounds: DEFAULT_AGENTIC_DISCUSSION_ROUNDS,
       styleGuideRules: "",
       sapAiCoreClientId: "mock-client-id",
       sapAiCoreClientSecret: "mock-client-secret",

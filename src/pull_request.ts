@@ -1,8 +1,10 @@
 import { info, warning } from "@actions/core";
 import config from "./config";
+import { AIProviderType } from "./ai";
 import { initOctokit } from "./octokit";
 import { loadContext } from "./context";
 import { runSummaryPrompt, AIComment, runReviewPrompt } from "./prompts";
+import { runAgenticReview } from "./agentic/review";
 import {
   buildLoadingMessage,
   buildReviewSummary,
@@ -201,13 +203,32 @@ export async function handlePullRequest() {
 
   // ======= START REVIEW =======
 
-  const review = await runReviewPrompt({
-    files: filesToReview,
-    prTitle: pull_request.title,
-    prDescription: pull_request.body || "",
-    prSummary: summary.description,
-  });
-  info(`reviewed pull request`);
+  // Agentic review is opt-in (AGENTIC_REVIEW). It only supports the ai-sdk
+  // provider; for any other provider we fall back to the standard single-shot
+  // review so existing configs are never broken.
+  const useAgentic =
+    config.agenticReview && config.llmProvider === AIProviderType.AI_SDK;
+  if (config.agenticReview && !useAgentic) {
+    warning(
+      `agentic review is only supported for the '${AIProviderType.AI_SDK}' provider; falling back to standard review`
+    );
+  }
+
+  const review = useAgentic
+    ? await runAgenticReview({
+        files: filesToReview,
+        prTitle: pull_request.title,
+        prDescription: pull_request.body || "",
+        prSummary: summary.description,
+        repoRoot: process.cwd(),
+      })
+    : await runReviewPrompt({
+        files: filesToReview,
+        prTitle: pull_request.title,
+        prDescription: pull_request.body || "",
+        prSummary: summary.description,
+      });
+  info(`reviewed pull request${useAgentic ? " (agentic)" : ""}`);
 
   // Post review comments
   const comments = review.comments.filter(

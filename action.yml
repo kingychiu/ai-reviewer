@@ -23,3 +23,23 @@ inputs:
     required: false
     description: 'GitHub Server URL for GitHub Enterprise Server (e.g., https://github.example.com)'
     default: 'https://github.com'
+  agentic_review:
+    required: false
+    description: 'Opt-in: use the agentic reviewer that reads repo context/rules with tools (read_file, grep, list_guidelines) before commenting. Requires LLM_PROVIDER=ai-sdk. Default off (standard single-shot review).'
+    default: 'false'
+  agents:
+    required: false
+    description: 'The explorer panel for agentic review. Comma-separated model names (e.g. "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro") or a JSON array of self-describing agents: [{"id","model","instructions","provider","baseUrl","apiKeyEnv"}]. apiKeyEnv is the NAME of an env var holding the key (never a raw key) so a panel can span platforms. When set, takes precedence over llm_model, and the top-level llm_model/llm_api_key may be left unset.'
+    default: ''
+  synthesis_agent:
+    required: false
+    description: 'Agent that merges the panel''s findings into the final review. Bare model name or a JSON object {"id","model","instructions","provider","baseUrl","apiKeyEnv"}. Defaults to llm_model, else the first agent.'
+    default: ''
+  agentic_max_steps:
+    required: false
+    description: 'Caps each agent''s tool loop in a single explore/discussion call (one step = one model turn, optionally a tool call + result). Higher = deeper investigation, more cost. Default 12.'
+    default: '12'
+  agentic_discussion_rounds:
+    required: false
+    description: 'Number of peer-discussion rounds when there are 2+ agents (each round, every agent critiques the others). A single agent never discusses. Default 2.'
+    default: '2'

@@ -1,15 +1,20 @@
-name: Presubmit.ai
+name: Presubmit.ai (agentic — this branch)
 
 permissions:
   contents: read
   pull-requests: write
   issues: write
 
+# Dogfood build: runs the action code from THIS branch (`uses: ./`) on the
+# fork's own PRs. Uses `pull_request` (not `pull_request_target`) so the merge
+# ref is checked out and repo secrets are available for same-repo PRs.
+#
+# Multi-agent mode: each agent is self-describing (model + provider + baseUrl +
+# apiKeyEnv), so the top-level LLM_* env vars are intentionally left unset. Keys
+# are referenced by env-var NAME (apiKeyEnv) — set the matching repo secret(s).
 on:
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize]
-  pull_request_review_comment:
-    types: [created]
 
 jobs:
   review:
@@ -17,12 +22,21 @@ jobs:
     steps:
       - name: Check required secrets
         run: |
-          if [ -z "${{ secrets.LLM_API_KEY }}" ]; then
-            echo "Error: LLM_API_KEY secret is not configured"
+          if [ -z "${{ secrets.OPENROUTER_API_KEY }}" ]; then
+            echo "Error: OPENROUTER_API_KEY secret is not configured"
             exit 1
           fi
-      - uses: presubmit/ai-reviewer@latest
+      - uses: actions/checkout@v4
+      - name: Build action (dist)
+        run: npm ci && npm run build
+      - uses: ./
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
-          LLM_MODEL: "claude-sonnet-4-5"
+          # Secret(s) exposed by NAME; agents reference these via apiKeyEnv.
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          AGENTIC_REVIEW: "true"
+          AGENTIC_DISCUSSION_ROUNDS: "1"   # 2 agents below -> they auto-discuss
+          AGENTS: >-
+            [{"id":"security","model":"deepseek/deepseek-v4-flash","provider":"ai-sdk","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY","instructions":"Focus on security and input validation."},
+             {"id":"correctness","model":"moonshotai/kimi-k2.6","provider":"ai-sdk","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY","instructions":"Focus on logic bugs, edge cases, and broken contracts."}]
+          SYNTHESIS_AGENT: '{"id":"synth","model":"deepseek/deepseek-v4-flash","provider":"ai-sdk","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY"}'
