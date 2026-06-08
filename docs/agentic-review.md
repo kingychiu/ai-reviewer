@@ -15,9 +15,9 @@ comments.
 ## Contents
 
 - [Quick start](#quick-start)
+- [Pipeline & modes](#pipeline--modes)
 - [Configuration reference](#configuration-reference)
 - [Agent spec format](#agent-spec-format)
-- [Pipeline & modes](#pipeline--modes)
 - [What each agent can access](#what-each-agent-can-access)
 - [Prompt composition & instruction usage](#prompt-composition--instruction-usage)
 - [Cost & latency](#cost--latency)
@@ -52,19 +52,111 @@ A panel of two agents that discuss:
 
 ---
 
+## Pipeline & modes
+
+Read this first — the config below names the parts of this pipeline.
+
+Every agentic run is **explore → [discuss] → synthesize**. During explore and
+discussion, each agent runs a **tool loop**: call a tool, read the result,
+decide the next action, repeat — until it has enough context to report findings.
+Synthesis has no tools.
+
+```
+   tools available to explore/discussion agents:
+   ┌────────────────┬───────────────────────────────────────────┐
+   │ list_guidelines │ CLAUDE.md, AGENTS.md, .claude/rules, skills │
+   │ read_file       │ surrounding code / definitions / callers    │
+   │ grep            │ usages & related patterns across the repo   │
+   └────────────────┴───────────────────────────────────────────┘
+```
+
+### Single agent (`AGENTS` empty → uses `LLM_MODEL`)
+
+```
+        ┌─ EXPLORE ─────────────────┐   ┌─ SYNTHESIZE ────────┐
+ PR ───▶ │ agent loops with tools    │──▶│ SYNTHESIS_AGENT     │──▶ comments
+ diff    │  → findings notes         │   │ notes → diff lines  │
+        └───────────────────────────┘   └─────────────────────┘
+   the tool loop above is capped by AGENTIC_MAX_STEPS
+```
+
+### `REVIEW_MODE=single` — panel reviews, then merge
+
+```
+                 ┌─ EXPLORE (concurrent) ─────────┐
+            ┌───▶│  ┌────────────────────────┐   │──┐ notes_A
+            │    │  │ "security"   (model A) │   │  │
+ PR ───────▶┤    │  │ + tools, own focus     │   │  │      ┌─ SYNTHESIZE ──────┐
+ diff       │    │  └────────────────────────┘   │  ├─────▶│ SYNTHESIS_AGENT   │──▶ comments
+            │    │  ┌────────────────────────┐   │  │      │ merge + de-dupe   │
+            └───▶│  │ "correctness"(model B) │   │──┘ notes_B │ → diff lines    │
+                 │  │ + tools, own focus     │   │         └───────────────────┘
+                 │  └────────────────────────┘   │
+                 └────────────────────────────────┘
+   agents never see each other's work · cheapest multi-agent · broad coverage
+```
+
+### `REVIEW_MODE=discussion` — panel critiques EACH OTHER, then merge
+
+```
+   ┌─ EXPLORE (concurrent)┐   ┌─ DISCUSS · R rounds (concurrent each round) ───────┐   ┌─ SYNTHESIZE ─────┐
+A: │ "security"  ─notes_A─┼──▶│  A sees {B}  ─▶ agree / refute(verify) / add ─▶ A' │──▶│ SYNTHESIS_AGENT  │
+   │ + tools, focus       │   │            ╲ ╱   keeps A's own model+persona       │   │ weight by        │──▶ comments
+ PR│                      │   │             ╳                                      │   │ cross-agent      │
+   │                      │   │            ╱ ╲                                     │   │ agreement →      │
+B: │ "correctness"─notes_B┼──▶│  B sees {A}  ─▶ agree / refute(verify) / add ─▶ B' │──▶│ diff lines       │
+   │ + tools, focus       │   │   (each round runs on the prev round's snapshot)   │   └──────────────────┘
+   └──────────────────────┘   │   fail → that agent keeps its prior notes          │
+                              └────────────────────────────────────────────────────┘
+                                 R = AGENTIC_DISCUSSION_ROUNDS · skipped if < 2 agents
+```
+
+One discussion round in close-up — the cross is the point (every agent reads
+every *other* agent):
+
+```
+        round r input = all agents' notes from round r-1
+                 │
+     ┌───────────┼───────────┐
+     ▼           ▼           ▼
+  agent A     agent B     agent C        ← run concurrently
+  reads B,C   reads A,C   reads A,B      ← each sees the OTHERS
+     │           │           │
+     ▼           ▼           ▼
+    A'          B'          C'           ← revised positions → round r+1 (or synthesize)
+```
+
+### Mode comparison
+
+| | single | discussion |
+|---|---|---|
+| agents see each other's findings | ❌ | ✅ (the panel, not an external critic) |
+| who critiques | nobody (just merged) | the agents critique **each other** |
+| extra tool-using passes | none | `N × AGENTIC_DISCUSSION_ROUNDS` |
+| needs | 1+ agents | 2+ agents |
+| best at | coverage, low cost | precision — killing false positives, filling gaps |
+| guardrail | — | anti-sycophancy prompt + tool verification |
+
+**Mental model:** *single* = independent reports stapled together by an editor.
+*discussion* = the same reviewers argue it out (refute weak claims, defend
+strong ones, surface what others missed), then the editor finalizes.
+
+---
+
 ## Configuration reference
 
-Every setting can be passed as an **environment variable** or as an **action
-input** (lower-cased name). All are optional except where noted.
+Each setting maps to a part of the pipeline above. Every setting can be passed
+as an **environment variable** or as an **action input** (lower-cased name). All
+are optional except where noted.
 
-| Env var | Action input | Type | Default | Purpose |
+| Env var | Action input | Type | Default | Controls |
 |---|---|---|---|---|
-| `AGENTIC_REVIEW` | `agentic_review` | bool | `false` | Master switch. `false` = standard single-shot review. |
-| `AGENTS` | `agents` | agent list | _(empty)_ | The explorer panel. When set, **overrides `LLM_MODEL`**. When empty, the single `LLM_MODEL` is used. |
-| `SYNTHESIS_AGENT` | `synthesis_agent` | single agent | `LLM_MODEL` | The judge that merges findings into the final structured review. Independent config; does **not** reuse an explorer agent. |
-| `REVIEW_MODE` | `review_mode` | `single` \| `discussion` | `single` | `single` = explore → synthesize. `discussion` = the panel critiques each other first (needs 2+ agents). |
-| `AGENTIC_DISCUSSION_ROUNDS` | `agentic_discussion_rounds` | int > 0 | `1` | Peer-discussion rounds when `REVIEW_MODE=discussion`. |
-| `AGENTIC_MAX_STEPS` | `agentic_max_steps` | int > 0 | `12` | Max tool-use steps per agent per call. |
+| `AGENTIC_REVIEW` | `agentic_review` | bool | `false` | Master switch. `false` = standard single-shot review (no panel/tools). |
+| `AGENTS` | `agents` | agent list | _(empty)_ | The **explore** panel. When set, overrides `LLM_MODEL` and the top-level `LLM_*` may be omitted. Empty = one agent from `LLM_MODEL`. |
+| `REVIEW_MODE` | `review_mode` | `single` \| `discussion` | `single` | Whether the **discuss** phase runs. `single` = explore→synthesize. `discussion` = explore→discuss→synthesize (needs 2+ agents). |
+| `AGENTIC_DISCUSSION_ROUNDS` | `agentic_discussion_rounds` | int > 0 | `1` | How many **discuss** rounds (the `R` in the diagram). Each round = every agent critiques the others once. |
+| `SYNTHESIS_AGENT` | `synthesis_agent` | single agent | `LLM_MODEL` | The **synthesize** agent (the judge that merges findings → inline comments). |
+| `AGENTIC_MAX_STEPS` | `agentic_max_steps` | int > 0 | `12` | Caps each agent's **tool loop** in a single explore/discussion call. One step = one model turn (optionally a tool call + its result). Higher = the agent can read more files / grep more before concluding (more thorough, more cost/latency); lower = faster/cheaper but shallower. It is *not* the number of comments or rounds. |
 
 Built on the existing base settings (used as fallbacks for every agent):
 
@@ -104,7 +196,7 @@ AGENTS: >-
      "instructions":"Focus on security: injection, authz, secrets, SSRF."},
     {"id":"correctness","model":"google/gemini-2.5-pro",
      "instructions":"Focus on logic bugs, edge cases, broken contracts.",
-     "provider":"ai-sdk","baseUrl":"https://openrouter.ai/api/v1"}
+     "provider":"ai-sdk","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY"}
   ]
 ```
 
@@ -156,92 +248,6 @@ Key resolution per agent: `env[apiKeyEnv]` → top-level `LLM_API_KEY`. An agent
 with no `apiKeyEnv` uses `LLM_API_KEY` (itself sourced from a secret). In
 multi-agent mode where every agent sets `apiKeyEnv`, `LLM_API_KEY` /
 `LLM_MODEL` / `LLM_BASE_URL` can all be omitted.
-
----
-
-## Pipeline & modes
-
-Every agentic run is **explore → [discuss] → synthesize**. Tools are available
-during explore and discussion (not synthesis).
-
-```
-   tools available to explore/discussion agents:
-   ┌────────────────┬───────────────────────────────────────────┐
-   │ list_guidelines │ CLAUDE.md, AGENTS.md, .claude/rules, skills │
-   │ read_file       │ surrounding code / definitions / callers    │
-   │ grep            │ usages & related patterns across the repo   │
-   └────────────────┴───────────────────────────────────────────┘
-```
-
-### Single agent (`AGENTS` empty → uses `LLM_MODEL`)
-
-```
-        ┌─ EXPLORE ─────────────────┐   ┌─ SYNTHESIZE ────────┐
- PR ───▶ │ agent loops with tools    │──▶│ SYNTHESIS_AGENT     │──▶ comments
- diff    │  → findings notes         │   │ notes → diff lines  │
-        └───────────────────────────┘   └─────────────────────┘
-```
-
-### `REVIEW_MODE=single` — panel reviews, then merge
-
-```
-                 ┌─ EXPLORE (concurrent) ─────────┐
-            ┌───▶│  ┌────────────────────────┐   │──┐ notes_A
-            │    │  │ "security"   (model A) │   │  │
- PR ───────▶┤    │  │ + tools, own focus     │   │  │      ┌─ SYNTHESIZE ──────┐
- diff       │    │  └────────────────────────┘   │  ├─────▶│ SYNTHESIS_AGENT   │──▶ comments
-            │    │  ┌────────────────────────┐   │  │      │ merge + de-dupe   │
-            └───▶│  │ "correctness"(model B) │   │──┘ notes_B │ → diff lines    │
-                 │  │ + tools, own focus     │   │         └───────────────────┘
-                 │  └────────────────────────┘   │
-                 └────────────────────────────────┘
-   agents never see each other's work · cheapest multi-agent · broad coverage
-```
-
-### `REVIEW_MODE=discussion` — panel critiques EACH OTHER, then merge
-
-```
-   ┌─ EXPLORE (concurrent)┐   ┌─ DISCUSS · R rounds (concurrent each round) ───────┐   ┌─ SYNTHESIZE ─────┐
-A: │ "security"  ─notes_A─┼──▶│  A sees {B}  ─▶ agree / refute(verify) / add ─▶ A' │──▶│ SYNTHESIS_AGENT  │
-   │ + tools, focus       │   │            ╲ ╱   keeps A's own model+persona       │   │ weight by        │──▶ comments
- PR│                      │   │             ╳                                      │   │ cross-agent      │
-   │                      │   │            ╱ ╲                                     │   │ agreement →      │
-B: │ "correctness"─notes_B┼──▶│  B sees {A}  ─▶ agree / refute(verify) / add ─▶ B' │──▶│ diff lines       │
-   │ + tools, focus       │   │   (each round runs on the prev round's snapshot)   │   └──────────────────┘
-   └──────────────────────┘   │   fail → that agent keeps its prior notes          │
-                              └────────────────────────────────────────────────────┘
-                                 skipped if < 2 agents · "do NOT rubber-stamp"
-```
-
-One discussion round in close-up — the cross is the point (every agent reads
-every *other* agent):
-
-```
-        round r input = all agents' notes from round r-1
-                 │
-     ┌───────────┼───────────┐
-     ▼           ▼           ▼
-  agent A     agent B     agent C        ← run concurrently
-  reads B,C   reads A,C   reads A,B      ← each sees the OTHERS
-     │           │           │
-     ▼           ▼           ▼
-    A'          B'          C'           ← revised positions → round r+1 (or synthesize)
-```
-
-### Mode comparison
-
-| | single | discussion |
-|---|---|---|
-| agents see each other's findings | ❌ | ✅ (the panel, not an external critic) |
-| who critiques | nobody (just merged) | the agents critique **each other** |
-| extra tool-using passes | none | `N × AGENTIC_DISCUSSION_ROUNDS` |
-| needs | 1+ agents | 2+ agents |
-| best at | coverage, low cost | precision — killing false positives, filling gaps |
-| guardrail | — | anti-sycophancy prompt + tool verification |
-
-**Mental model:** *single* = independent reports stapled together by an editor.
-*discussion* = the same reviewers argue it out (refute weak claims, defend
-strong ones, surface what others missed), then the editor finalizes.
 
 ---
 
@@ -362,7 +368,7 @@ correctly refuted. Output your updated findings in the same notes format.
 
 ## Cost & latency
 
-Roughly, number of LLM calls (N = panel size, R = discussion rounds):
+Roughly, number of LLM calls (N = panel size, R = `AGENTIC_DISCUSSION_ROUNDS`):
 
 | Mode | LLM calls |
 |---|---|
@@ -392,30 +398,30 @@ cheaper models for explorers if needed.
 
 ## Full examples
 
-**Single mode, panel of two, mixed providers, custom synthesis model:**
+**Single mode, panel of two, multi-platform via `apiKeyEnv`, custom synthesis model:**
 
 ```yaml
 - uses: actions/checkout@v4
 - uses: presubmit/ai-reviewer@latest
   env:
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    LLM_API_KEY: ${{ secrets.LLM_API_KEY }}     # OpenRouter key
-    LLM_PROVIDER: ai-sdk
-    LLM_BASE_URL: https://openrouter.ai/api/v1
-    LLM_MODEL: deepseek/deepseek-v4-flash       # base + synthesis default
+    OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}   # referenced by apiKeyEnv
     AGENTIC_REVIEW: "true"
     REVIEW_MODE: single
     AGENTS: >-
       [
-        {"id":"security","model":"anthropic/claude-sonnet-4.5","instructions":"Focus on security and input validation."},
-        {"id":"correctness","model":"google/gemini-2.5-pro","instructions":"Focus on logic bugs and edge cases."}
+        {"id":"security","model":"anthropic/claude-sonnet-4.5","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY","instructions":"Focus on security and input validation."},
+        {"id":"correctness","model":"google/gemini-2.5-pro","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY","instructions":"Focus on logic bugs and edge cases."}
       ]
-    SYNTHESIS_AGENT: "openai/gpt-5"
+    SYNTHESIS_AGENT: '{"id":"judge","model":"openai/gpt-5","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY"}'
 ```
 
-**Discussion, two rounds:**
+**Discussion, two rounds (single OpenRouter key as the default):**
 
 ```yaml
+    LLM_PROVIDER: ai-sdk
+    LLM_BASE_URL: https://openrouter.ai/api/v1
+    LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
     AGENTIC_REVIEW: "true"
     REVIEW_MODE: discussion
     AGENTIC_DISCUSSION_ROUNDS: "2"
