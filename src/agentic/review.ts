@@ -247,8 +247,8 @@ Produce the final consolidated review.`;
  * Opt-in agentic review entrypoint. Returns the same PullRequestReview shape as
  * runReviewPrompt so it is a drop-in replacement in pull_request.ts.
  *
- * Pipeline: explore (AGENTS panel, concurrent) -> [discussion (peer, when
- * REVIEW_MODE=discussion)] -> synthesize (SYNTHESIS_AGENT).
+ * Pipeline: explore (AGENTS panel, concurrent) -> [discussion (peer, when 2+
+ * agents)] -> synthesize (SYNTHESIS_AGENT). One agent = single; 2+ = discuss.
  */
 export async function runAgenticReview(
   pr: AgenticReviewInput
@@ -262,7 +262,7 @@ export async function runAgenticReview(
   info(
     `agentic review: ${explorers.length} agent(s) [${explorers
       .map((a) => a.id)
-      .join(", ")}], mode=${config.reviewMode}`
+      .join(", ")}], mode=${explorers.length > 1 ? "multi (discussion)" : "single"}`
   );
 
   // Phase 1: explorers investigate the repo and produce notes (in parallel).
@@ -281,9 +281,9 @@ export async function runAgenticReview(
     return EMPTY_REVIEW;
   }
 
-  // Phase 2 (optional): peer discussion — the panel critiques each other across
-  // rounds. Needs at least two surviving agents to have a discussion.
-  if (config.reviewMode === "discussion" && notes.length > 1) {
+  // Phase 2: peer discussion — runs automatically whenever 2+ agents produced
+  // notes (a panel always discusses; a single agent has no peer).
+  if (notes.length > 1) {
     const participants = explorers.filter((a) =>
       notes.some((n) => n.agentId === a.id)
     );

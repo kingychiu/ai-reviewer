@@ -175,7 +175,6 @@ describe('Config', () => {
       expect(config.agenticReview).toBe(false);
       expect(config.agents).toEqual([]);
       expect(config.synthesisAgent).toBeUndefined();
-      expect(config.reviewMode).toBe('single');
       expect(config.agenticMaxSteps).toBe(12);
       expect(config.agenticDiscussionRounds).toBe(1);
     });
@@ -189,15 +188,6 @@ describe('Config', () => {
 
       process.env.AGENTIC_REVIEW = 'false';
       expect(new Config().agenticReview).toBe(false);
-    });
-
-    test('reviewMode accepts discussion, defaults to single otherwise', () => {
-      process.env.REVIEW_MODE = 'discussion';
-      expect(new Config().reviewMode).toBe('discussion');
-
-      process.env.REVIEW_MODE = 'nonsense';
-      expect(new Config().reviewMode).toBe('single');
-      delete process.env.REVIEW_MODE;
     });
 
     test('agenticMaxSteps parses positive ints and ignores junk', () => {

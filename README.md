@@ -165,17 +165,16 @@ can use different platforms. `apiKeyEnv` names a **secret env var** holding the
 key (never a raw key) — see [docs/agentic-review.md](docs/agentic-review.md) →
 *Secrets & multi-platform*.
 
-There are two modes, set by `REVIEW_MODE`:
+The mode is implied by how many agents you configure — there's no mode flag:
 
-- **`single`** *(default)* — **explore → synthesize**. Each agent reads the repo
-  with tools and reports findings (concurrently); the synthesis agent merges
-  them.
-- **`discussion`** — **explore → discuss → synthesize**. After exploring, the
-  panel agents critique **each other's** findings for `AGENTIC_DISCUSSION_ROUNDS`
-  rounds (default 1). Each round, every agent sees the others' findings and
-  agrees, refutes (verifying with tools), or adds missed issues — keeping its own
-  model and persona. (Needs 2+ agents; a single agent has no peer, so discussion
-  is skipped.)
+- **single agent** (`AGENTS` has one entry, or is empty → uses `LLM_MODEL`) —
+  **explore → synthesize**. The agent reads the repo with tools and reports
+  findings; the synthesis agent finalizes.
+- **multiple agents** (`AGENTS` has 2+) — **explore → discuss → synthesize**.
+  After exploring, the panel agents critique **each other's** findings for
+  `AGENTIC_DISCUSSION_ROUNDS` rounds (default 1) — each round every agent sees
+  the others' findings and agrees, refutes (verifying with tools), or adds
+  missed issues, keeping its own model and persona.
 
 The **synthesis** step (`SYNTHESIS_AGENT`) merges/de-duplicates the findings,
 weights them by cross-agent agreement, and maps them to precise diff lines. It
@@ -186,8 +185,7 @@ does **not** reuse an explorer agent.
         env:
           # ...
           AGENTIC_REVIEW: "true"
-          REVIEW_MODE: "discussion"            # "single" (default) or "discussion"
-          AGENTIC_DISCUSSION_ROUNDS: "1"       # rounds (discussion mode only)
+          AGENTIC_DISCUSSION_ROUNDS: "1"       # used when 2+ agents
           # Simple: comma-separated model names (id defaults to the model):
           AGENTS: "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro"
           # — or — a JSON array with ids, focuses, per-agent endpoints, and a
@@ -198,17 +196,16 @@ does **not** reuse an explorer agent.
           SYNTHESIS_AGENT: "openai/gpt-5"      # bare name or JSON object
 ```
 
-> ⚠️ A larger panel (and especially `discussion`) multiplies token usage and
-> latency on every PR. Start with one or two agents and 1 discussion round.
+> ⚠️ A larger panel (which then discusses) multiplies token usage and latency on
+> every PR. Start with one or two agents and 1 discussion round.
 
 | Setting | Default | Purpose |
 |---|---|---|
 | `AGENTIC_REVIEW` | `false` | Enable the agentic, context-aware reviewer |
-| `AGENTS` | _(empty)_ | Explorer panel; overrides `LLM_MODEL` when set |
+| `AGENTS` | _(empty)_ | Explorer panel; overrides `LLM_MODEL` when set. 1 agent = single; 2+ = discuss |
 | `SYNTHESIS_AGENT` | `LLM_MODEL` | Agent that merges findings into the final review |
-| `REVIEW_MODE` | `single` | `single`, or `discussion` (panel critiques each other) |
-| `AGENTIC_DISCUSSION_ROUNDS` | `1` | Peer-discussion rounds when `REVIEW_MODE=discussion` |
-| `AGENTIC_MAX_STEPS` | `12` | Tool-use steps allowed per agent |
+| `AGENTIC_DISCUSSION_ROUNDS` | `1` | Peer-discussion rounds (used when 2+ agents) |
+| `AGENTIC_MAX_STEPS` | `12` | Tool-loop steps per agent per explore/discussion call |
 
 ### GitHub Enterprise Server Support
 

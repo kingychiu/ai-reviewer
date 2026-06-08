@@ -33,7 +33,6 @@ jest.mock("../config", () => ({
     llmProvider: "ai-sdk",
     llmBaseUrl: undefined,
     llmApiKey: "key",
-    reviewMode: "single",
     agenticMaxSteps: 12,
     agenticDiscussionRounds: 1,
     styleGuideRules: "",
@@ -80,7 +79,6 @@ beforeEach(() => {
   config.llmProvider = "ai-sdk";
   config.llmBaseUrl = undefined as any;
   config.llmApiKey = "key";
-  (config as any).reviewMode = "single";
   (config as any).agenticMaxSteps = 12;
   (config as any).agenticDiscussionRounds = 1;
   config.styleGuideRules = "";
@@ -154,7 +152,7 @@ describe("runAgenticReview - single agent", () => {
   });
 });
 
-describe("runAgenticReview - multi agent, single mode", () => {
+describe("runAgenticReview - multiple agents (auto discussion)", () => {
   beforeEach(() => {
     (config as any).agents = [
       { id: "sec", model: "m1" },
@@ -162,43 +160,7 @@ describe("runAgenticReview - multi agent, single mode", () => {
     ];
   });
 
-  test("explores each agent concurrently and synthesizes all notes", async () => {
-    mockRunAgent
-      .mockResolvedValueOnce({ text: "notes-A", steps: 1 })
-      .mockResolvedValueOnce({ text: "notes-B", steps: 1 });
-    mockRunStructured.mockResolvedValue(sampleReview);
-
-    const result = await runAgenticReview(pr);
-
-    expect(mockRunAgent).toHaveBeenCalledTimes(2);
-    const synthPrompt = mockRunStructured.mock.calls[0][0].prompt;
-    expect(synthPrompt).toContain("notes-A");
-    expect(synthPrompt).toContain("notes-B");
-    expect(synthPrompt).toContain("sec");
-    expect(synthPrompt).toContain("perf");
-    expect(result).toEqual(sampleReview);
-  });
-
-  test("does NOT discuss in single mode", async () => {
-    mockRunAgent.mockResolvedValue({ text: "notes", steps: 1 });
-    mockRunStructured.mockResolvedValue(sampleReview);
-
-    await runAgenticReview(pr);
-
-    expect(mockRunAgent).toHaveBeenCalledTimes(2); // 2 explore, no discussion
-  });
-});
-
-describe("runAgenticReview - discussion mode", () => {
-  beforeEach(() => {
-    (config as any).agents = [
-      { id: "sec", model: "m1" },
-      { id: "perf", model: "m2" },
-    ];
-    (config as any).reviewMode = "discussion";
-  });
-
-  test("each agent discusses the others (1 round), then synthesizes", async () => {
+  test("2+ agents discuss automatically (no mode flag), then synthesize", async () => {
     mockRunAgent
       .mockResolvedValueOnce({ text: "explore-A", steps: 1 }) // explore sec
       .mockResolvedValueOnce({ text: "explore-B", steps: 1 }) // explore perf

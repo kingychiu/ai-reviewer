@@ -1,8 +1,6 @@
 import { getInput, getMultilineInput } from "@actions/core";
 import { AIProviderType } from "./ai";
 
-export type ReviewMode = "single" | "discussion";
-
 /**
  * A reviewer agent. `model` is required; `provider`/`baseUrl`/`apiKey` fall back
  * to the top-level `llmProvider` / `llmBaseUrl` / `llmApiKey` when omitted, so a
@@ -138,9 +136,8 @@ export class Config {
   public agenticReview: boolean;
   public agents: AgentSpec[]; // explorer panel; empty -> use single llmModel
   public synthesisAgent?: AgentSpec; // judge that merges notes -> structured review
-  public reviewMode: ReviewMode;
   public agenticMaxSteps: number;
-  public agenticDiscussionRounds: number; // peer-discussion rounds when mode=discussion
+  public agenticDiscussionRounds: number; // peer-discussion rounds when 2+ agents
 
   public sapAiCoreClientId: string | undefined;
   public sapAiCoreClientSecret: string | undefined;
@@ -195,13 +192,6 @@ export class Config {
     if (!this.llmApiKey && !isSapAiSdk && !agenticMultiAgent) {
       throw new Error("LLM_API_KEY is not set");
     }
-
-    const mode = (
-      process.env.REVIEW_MODE ||
-      getInput("review_mode") ||
-      "single"
-    ).toLowerCase();
-    this.reviewMode = mode === "discussion" ? "discussion" : "single";
 
     this.agenticMaxSteps = parsePositiveInt(
       process.env.AGENTIC_MAX_STEPS || getInput("agentic_max_steps"),
@@ -290,7 +280,6 @@ export default process.env.NODE_ENV === "test"
       agenticReview: false,
       agents: [] as AgentSpec[],
       synthesisAgent: undefined as AgentSpec | undefined,
-      reviewMode: "single" as ReviewMode,
       agenticMaxSteps: DEFAULT_AGENTIC_MAX_STEPS,
       agenticDiscussionRounds: DEFAULT_AGENTIC_DISCUSSION_ROUNDS,
       styleGuideRules: "",

@@ -42,11 +42,10 @@ Single agent, agentic (reads repo context before commenting):
     AGENTIC_REVIEW: "true"
 ```
 
-A panel of two agents that discuss:
+A panel of two agents (2+ agents automatically discuss):
 
 ```yaml
     AGENTIC_REVIEW: "true"
-    REVIEW_MODE: discussion
     AGENTS: "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro"
 ```
 
@@ -55,6 +54,9 @@ A panel of two agents that discuss:
 ## Pipeline & modes
 
 Read this first — the config below names the parts of this pipeline.
+
+There is **no mode flag** — the mode is implied by how many agents you
+configure: **1 agent = single**, **2+ agents = discussion**.
 
 Every agentic run is **explore → [discuss] → synthesize**. During explore and
 discussion, each agent runs a **tool loop**: call a tool, read the result,
@@ -68,35 +70,19 @@ Synthesis has no tools.
    │ read_file       │ surrounding code / definitions / callers    │
    │ grep            │ usages & related patterns across the repo   │
    └────────────────┴───────────────────────────────────────────┘
+   every explore AND discussion call is capped by AGENTIC_MAX_STEPS
 ```
 
-### Single agent (`AGENTS` empty → uses `LLM_MODEL`)
+### Single agent (`AGENTS` empty or one entry)
 
 ```
         ┌─ EXPLORE ─────────────────┐   ┌─ SYNTHESIZE ────────┐
  PR ───▶ │ agent loops with tools    │──▶│ SYNTHESIS_AGENT     │──▶ comments
  diff    │  → findings notes         │   │ notes → diff lines  │
         └───────────────────────────┘   └─────────────────────┘
-   the tool loop above is capped by AGENTIC_MAX_STEPS
 ```
 
-### `REVIEW_MODE=single` — panel reviews, then merge
-
-```
-                 ┌─ EXPLORE (concurrent) ─────────┐
-            ┌───▶│  ┌────────────────────────┐   │──┐ notes_A
-            │    │  │ "security"   (model A) │   │  │
- PR ───────▶┤    │  │ + tools, own focus     │   │  │      ┌─ SYNTHESIZE ──────┐
- diff       │    │  └────────────────────────┘   │  ├─────▶│ SYNTHESIS_AGENT   │──▶ comments
-            │    │  ┌────────────────────────┐   │  │      │ merge + de-dupe   │
-            └───▶│  │ "correctness"(model B) │   │──┘ notes_B │ → diff lines    │
-                 │  │ + tools, own focus     │   │         └───────────────────┘
-                 │  └────────────────────────┘   │
-                 └────────────────────────────────┘
-   agents never see each other's work · cheapest multi-agent · broad coverage
-```
-
-### `REVIEW_MODE=discussion` — panel critiques EACH OTHER, then merge
+### Multiple agents (`AGENTS` has 2+) — panel critiques EACH OTHER, then merge
 
 ```
    ┌─ EXPLORE (concurrent)┐   ┌─ DISCUSS · R rounds (concurrent each round) ───────┐   ┌─ SYNTHESIZE ─────┐
@@ -128,17 +114,17 @@ every *other* agent):
 
 ### Mode comparison
 
-| | single | discussion |
+| | single agent | multiple agents (discussion) |
 |---|---|---|
-| agents see each other's findings | ❌ | ✅ (the panel, not an external critic) |
-| who critiques | nobody (just merged) | the agents critique **each other** |
+| selected by | `AGENTS` has 0–1 entries | `AGENTS` has 2+ entries |
+| agents see each other's findings | n/a (one agent) | ✅ (the panel critiques each other) |
+| who critiques | nobody (just synthesized) | the agents critique **each other** |
 | extra tool-using passes | none | `N × AGENTIC_DISCUSSION_ROUNDS` |
-| needs | 1+ agents | 2+ agents |
-| best at | coverage, low cost | precision — killing false positives, filling gaps |
+| best at | speed, low cost | precision — killing false positives, filling gaps |
 | guardrail | — | anti-sycophancy prompt + tool verification |
 
-**Mental model:** *single* = independent reports stapled together by an editor.
-*discussion* = the same reviewers argue it out (refute weak claims, defend
+**Mental model:** *single agent* = one reviewer's report, finalized.
+*multiple agents* = the reviewers argue it out (refute weak claims, defend
 strong ones, surface what others missed), then the editor finalizes.
 
 ---
@@ -152,9 +138,8 @@ are optional except where noted.
 | Env var | Action input | Type | Default | Controls |
 |---|---|---|---|---|
 | `AGENTIC_REVIEW` | `agentic_review` | bool | `false` | Master switch. `false` = standard single-shot review (no panel/tools). |
-| `AGENTS` | `agents` | agent list | _(empty)_ | The **explore** panel. When set, overrides `LLM_MODEL` and the top-level `LLM_*` may be omitted. Empty = one agent from `LLM_MODEL`. |
-| `REVIEW_MODE` | `review_mode` | `single` \| `discussion` | `single` | Whether the **discuss** phase runs. `single` = explore→synthesize. `discussion` = explore→discuss→synthesize (needs 2+ agents). |
-| `AGENTIC_DISCUSSION_ROUNDS` | `agentic_discussion_rounds` | int > 0 | `1` | How many **discuss** rounds (the `R` in the diagram). Each round = every agent critiques the others once. |
+| `AGENTS` | `agents` | agent list | _(empty)_ | The **explore** panel — and it sets the mode: 0–1 agents = single (explore→synthesize), 2+ agents = discussion (explore→discuss→synthesize). When set, overrides `LLM_MODEL` and the top-level `LLM_*` may be omitted. |
+| `AGENTIC_DISCUSSION_ROUNDS` | `agentic_discussion_rounds` | int > 0 | `1` | How many **discuss** rounds (the `R` in the diagram) when there are 2+ agents. Each round = every agent critiques the others once. Ignored for a single agent. |
 | `SYNTHESIS_AGENT` | `synthesis_agent` | single agent | `LLM_MODEL` | The **synthesize** agent (the judge that merges findings → inline comments). |
 | `AGENTIC_MAX_STEPS` | `agentic_max_steps` | int > 0 | `12` | Caps each agent's **tool loop** in a single explore/discussion call. One step = one model turn (optionally a tool call + its result). Higher = the agent can read more files / grep more before concluding (more thorough, more cost/latency); lower = faster/cheaper but shallower. It is *not* the number of comments or rounds. |
 
@@ -328,7 +313,7 @@ Focus on security: injection, authz, secrets, SSRF. Ignore style.
 </Your Focus>
 ```
 
-So with `AGENTS = [security, correctness]` and `REVIEW_MODE=discussion`:
+So with `AGENTS = [security, correctness]` (2 agents → they discuss):
 
 ```
 security agent    = base + <Focus: security…>   → explores, then discusses correctness (still security-lens)
@@ -398,7 +383,7 @@ cheaper models for explorers if needed.
 
 ## Full examples
 
-**Single mode, panel of two, multi-platform via `apiKeyEnv`, custom synthesis model:**
+**Panel of two (2 agents → they discuss), multi-platform via `apiKeyEnv`, custom synthesis model:**
 
 ```yaml
 - uses: actions/checkout@v4
@@ -407,7 +392,6 @@ cheaper models for explorers if needed.
     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}   # referenced by apiKeyEnv
     AGENTIC_REVIEW: "true"
-    REVIEW_MODE: single
     AGENTS: >-
       [
         {"id":"security","model":"anthropic/claude-sonnet-4.5","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY","instructions":"Focus on security and input validation."},
@@ -416,14 +400,13 @@ cheaper models for explorers if needed.
     SYNTHESIS_AGENT: '{"id":"judge","model":"openai/gpt-5","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY"}'
 ```
 
-**Discussion, two rounds (single OpenRouter key as the default):**
+**Three agents, two discussion rounds (single OpenRouter key as the default):**
 
 ```yaml
     LLM_PROVIDER: ai-sdk
     LLM_BASE_URL: https://openrouter.ai/api/v1
     LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
     AGENTIC_REVIEW: "true"
-    REVIEW_MODE: discussion
     AGENTIC_DISCUSSION_ROUNDS: "2"
     AGENTS: "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro, openai/gpt-5"
 ```

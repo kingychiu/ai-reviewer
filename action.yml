@@ -35,15 +35,11 @@ inputs:
     required: false
     description: 'Agent that merges the panel''s findings into the final review. Bare model name or a JSON object {"id","model","instructions","provider","baseUrl","apiKeyEnv"}. Defaults to llm_model, else the first agent.'
     default: ''
-  review_mode:
-    required: false
-    description: 'Agentic review mode: "single" (agents review, then the synthesis agent merges) or "discussion" (the panel agents critique each other''s findings before synthesis; needs 2+ agents). Default single.'
-    default: 'single'
   agentic_max_steps:
     required: false
-    description: 'Max tool-use steps per agent during agentic review. Default 12.'
+    description: 'Caps each agent''s tool loop in a single explore/discussion call (one step = one model turn, optionally a tool call + result). Higher = deeper investigation, more cost. Default 12.'
     default: '12'
   agentic_discussion_rounds:
     required: false
-    description: 'Number of peer-discussion rounds when review_mode=discussion (each round, every agent critiques the others). Default 1.'
+    description: 'Number of peer-discussion rounds when there are 2+ agents (each round, every agent critiques the others). A single agent never discusses. Default 1.'
     default: '1'

@@ -35,8 +35,7 @@ jobs:
           # Secret(s) exposed by NAME; agents reference these via apiKeyEnv.
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           AGENTIC_REVIEW: "true"
-          REVIEW_MODE: discussion
-          AGENTIC_DISCUSSION_ROUNDS: "1"
+          AGENTIC_DISCUSSION_ROUNDS: "1"   # 2 agents below -> they auto-discuss
           AGENTS: >-
             [{"id":"security","model":"deepseek/deepseek-v4-flash","provider":"ai-sdk","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY","instructions":"Focus on security and input validation."},
              {"id":"correctness","model":"moonshotai/kimi-k2.6","provider":"ai-sdk","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY","instructions":"Focus on logic bugs, edge cases, and broken contracts."}]
