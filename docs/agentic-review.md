@@ -75,26 +75,38 @@ Synthesis has no tools.
 
 ### Single agent (`AGENTS` empty or one entry)
 
+One agent makes **one explore call**. Inside it, a tool loop runs up to
+`AGENTIC_MAX_STEPS` steps; then synthesize (no tool loop).
+
 ```
-        ┌─ EXPLORE ─────────────────┐   ┌─ SYNTHESIZE ────────┐
- PR ───▶ │ agent loops with tools    │──▶│ SYNTHESIS_AGENT     │──▶ comments
- diff    │  → findings notes         │   │ notes → diff lines  │
-        └───────────────────────────┘   └─────────────────────┘
+        ┌─ EXPLORE  (1 call) ─────────────────────┐   ┌─ SYNTHESIZE ────────┐
+        │  ┌───────────────────────────────────┐  │   │ SYNTHESIS_AGENT     │
+ PR ───▶ │  │ tool loop: read_file/grep/        │  │──▶│ (no tools)          │──▶ comments
+ diff    │  │ list_guidelines → reason → repeat │  │   │ notes → diff lines  │
+        │  │  ⟲ up to AGENTIC_MAX_STEPS steps  │  │   └─────────────────────┘
+        │  └───────────────────────────────────┘  │
+        │            → findings notes              │
+        └─────────────────────────────────────────┘
+   AGENTIC_MAX_STEPS caps this single explore loop.
 ```
 
 ### Multiple agents (`AGENTS` has 2+) — panel critiques EACH OTHER, then merge
 
+`AGENTIC_MAX_STEPS` caps the tool loop **inside every box below** — each of the
+N explore calls AND each of the N×R discuss calls runs its own loop up to that
+many steps.
+
 ```
-   ┌─ EXPLORE (concurrent)┐   ┌─ DISCUSS · R rounds (concurrent each round) ───────┐   ┌─ SYNTHESIZE ─────┐
-A: │ "security"  ─notes_A─┼──▶│  A sees {B}  ─▶ agree / refute(verify) / add ─▶ A' │──▶│ SYNTHESIS_AGENT  │
-   │ + tools, focus       │   │            ╲ ╱   keeps A's own model+persona       │   │ weight by        │──▶ comments
- PR│                      │   │             ╳                                      │   │ cross-agent      │
-   │                      │   │            ╱ ╲                                     │   │ agreement →      │
-B: │ "correctness"─notes_B┼──▶│  B sees {A}  ─▶ agree / refute(verify) / add ─▶ B' │──▶│ diff lines       │
-   │ + tools, focus       │   │   (each round runs on the prev round's snapshot)   │   └──────────────────┘
-   └──────────────────────┘   │   fail → that agent keeps its prior notes          │
-                              └────────────────────────────────────────────────────┘
-                                 R = AGENTIC_DISCUSSION_ROUNDS · skipped if < 2 agents
+   ┌─ EXPLORE (N calls, concurrent)┐  ┌─ DISCUSS · R rounds (N calls/round) ───────────────┐   ┌─ SYNTHESIZE ─────┐
+A: │ "security"  ─notes_A─┐         │  │  A sees {B}  ─▶ agree / refute(verify) / add ─▶ A' │──▶│ SYNTHESIS_AGENT  │
+   │ tool loop ≤MAX_STEPS │ + focus │  │            ╲ ╱  tool loop ≤MAX_STEPS · own model   │   │ weight by        │──▶ comments
+ PR│                      │         │  │             ╳                                      │   │ cross-agent      │
+   │                      │         │  │            ╱ ╲  tool loop ≤MAX_STEPS · own model   │   │ agreement →      │
+B: │ "correctness"─notes_B┘         │  │  B sees {A}  ─▶ agree / refute(verify) / add ─▶ B' │──▶│ diff lines       │
+   │ tool loop ≤MAX_STEPS │ + focus │  │   (each round runs on the prev round's snapshot)   │   └──────────────────┘
+   └────────────────────────────────┘  │   fail → that agent keeps its prior notes          │
+                                       └────────────────────────────────────────────────────┘
+            ≤MAX_STEPS = AGENTIC_MAX_STEPS · R = AGENTIC_DISCUSSION_ROUNDS · discuss skipped if < 2 agents
 ```
 
 One discussion round in close-up — the cross is the point (every agent reads
