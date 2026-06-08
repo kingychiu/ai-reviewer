@@ -23,3 +23,27 @@ inputs:
     required: false
     description: 'GitHub Server URL for GitHub Enterprise Server (e.g., https://github.example.com)'
     default: 'https://github.com'
+  agentic_review:
+    required: false
+    description: 'Opt-in: use the agentic reviewer that reads repo context/rules with tools (read_file, grep, list_guidelines) before commenting. Requires LLM_PROVIDER=ai-sdk. Default off (standard single-shot review).'
+    default: 'false'
+  agents:
+    required: false
+    description: 'The explorer panel for agentic review. Comma-separated model names (e.g. "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro") or a JSON array of agents: [{"id","model","instructions","provider","baseUrl","apiKey"}]. When set, takes precedence over llm_model. Empty = use the single llm_model.'
+    default: ''
+  synthesis_agent:
+    required: false
+    description: 'Agent that merges the panel''s findings into the final review. Bare model name or a JSON object {"id","model","instructions","provider","baseUrl","apiKey"}. Defaults to llm_model (not an explorer agent).'
+    default: ''
+  review_strategy:
+    required: false
+    description: 'Multi-agent strategy: "parallel" (agents review independently, then the synthesis agent merges) or "debate" (the panel agents critique each other''s findings before synthesis). Default parallel.'
+    default: 'parallel'
+  agentic_max_steps:
+    required: false
+    description: 'Max tool-use steps per agent during agentic review. Default 12.'
+    default: '12'
+  agentic_debate_rounds:
+    required: false
+    description: 'Number of peer-debate rounds when review_strategy=debate (each round, every agent critiques the others). Default 1.'
+    default: '1'

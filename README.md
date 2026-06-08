@@ -123,6 +123,87 @@ To use OpenRouter or other OpenAI-compatible providers with the `ai-sdk` provide
 
 **Note**: This configuration only works with `LLM_PROVIDER=ai-sdk`. It supports any OpenAI-compatible API including OpenRouter, Anyscale, Together AI, and others. The `sap-ai-sdk` provider uses its own `SAP_AI_CORE_BASE_URL` configuration instead.
 
+### Agentic Review (opt-in)
+
+By default the reviewer makes a single pass over the diff. You can opt into an
+**agentic review** that, before commenting, uses tools to read the
+repository's guidelines (`CLAUDE.md`, `AGENTS.md`, `.claude/rules`,
+`.claude/skills`, …), read surrounding files, and grep for related code — so
+comments are grounded in project conventions and real context rather than the
+diff alone.
+
+It is **off by default** and only affects the inline-comment review step; the PR
+summary and everything else are unchanged. It requires `LLM_PROVIDER=ai-sdk`
+(falls back to the standard review for any other provider).
+
+> 📖 Full reference (all config, diagrams, prompt/instruction details):
+> [`docs/agentic-review.md`](docs/agentic-review.md).
+
+```yaml
+      - uses: presubmit/ai-reviewer@latest
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_MODEL: "anthropic/claude-sonnet-4.5"
+          LLM_PROVIDER: "ai-sdk"
+          LLM_BASE_URL: "https://openrouter.ai/api/v1"
+          AGENTIC_REVIEW: "true"        # opt-in
+          AGENTIC_MAX_STEPS: "12"       # optional, tool-use budget per model
+```
+
+> The agent reads files from the checked-out workspace, so make sure
+> `actions/checkout` runs before this step (the default workflow already does).
+
+#### A panel of agents (parallel or debate)
+
+With agentic review enabled you can run a **panel of agents** via `AGENTS`. When
+set it **takes precedence over `LLM_MODEL`**; when empty the single `LLM_MODEL`
+is used. Each agent has an `id` (label used in logs/attribution), a `model`,
+optional `instructions` (a focus/persona), and optional `provider`/`baseUrl`/
+`apiKey` so different agents can use different providers.
+
+The pipeline has three phases:
+
+- **explore** — the `AGENTS` panel; each agent reads the repo with tools and
+  reports findings (in parallel).
+- **debate** *(optional)* — when `REVIEW_STRATEGY=debate`, the panel agents
+  critique **each other's** findings for `AGENTIC_DEBATE_ROUNDS` rounds
+  (default 1). Each round, every agent sees the others' findings and agrees,
+  refutes (verifying with tools), or adds missed issues — keeping its own model
+  and persona. (A single agent has no peer, so debate is skipped.)
+- **synthesize** — the `SYNTHESIS_AGENT` merges/de-duplicates the findings,
+  weights them by cross-agent agreement, and maps them to precise diff lines.
+
+`SYNTHESIS_AGENT` is configured independently and defaults to the base
+`LLM_MODEL` when unset — it does **not** reuse an explorer agent.
+
+```yaml
+        env:
+          # ...
+          AGENTIC_REVIEW: "true"
+          REVIEW_STRATEGY: "debate"          # "parallel" (default) or "debate"
+          AGENTIC_DEBATE_ROUNDS: "1"         # peer-debate rounds (debate only)
+          # Simple: comma-separated model names (id defaults to the model):
+          AGENTS: "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro"
+          # — or — a JSON array with ids, focuses, and per-agent providers:
+          # AGENTS: >-
+          #   [{"id":"security","model":"anthropic/claude-sonnet-4.5","instructions":"Focus on security: injection, authz, secrets."},
+          #    {"id":"correctness","model":"google/gemini-2.5-pro","instructions":"Focus on logic bugs and edge cases."}]
+          SYNTHESIS_AGENT: "openai/gpt-5"    # bare name or JSON object
+```
+
+> ⚠️ A larger panel (and especially `debate`) multiplies token usage and latency
+> on every PR. Start with one or two agents and 1 debate round.
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `AGENTIC_REVIEW` | `false` | Enable the agentic, context-aware reviewer |
+| `AGENTS` | _(empty)_ | Explorer panel; overrides `LLM_MODEL` when set |
+| `SYNTHESIS_AGENT` | `LLM_MODEL` | Agent that merges findings into the final review |
+| `REVIEW_STRATEGY` | `parallel` | `parallel`, or `debate` (panel critiques each other) |
+| `AGENTIC_DEBATE_ROUNDS` | `1` | Peer-debate rounds when `REVIEW_STRATEGY=debate` |
+| `AGENTIC_MAX_STEPS` | `12` | Tool-use steps allowed per agent |
+
 ### GitHub Enterprise Server Support
 
 If you're using GitHub Enterprise Server, you can configure the action to work with your instance by adding these environment variables:
