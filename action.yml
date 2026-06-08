@@ -41,5 +41,5 @@ inputs:
     default: '12'
   agentic_discussion_rounds:
     required: false
-    description: 'Number of peer-discussion rounds when there are 2+ agents (each round, every agent critiques the others). A single agent never discusses. Default 1.'
-    default: '1'
+    description: 'Number of peer-discussion rounds when there are 2+ agents (each round, every agent critiques the others). A single agent never discusses. Default 2.'
+    default: '2'

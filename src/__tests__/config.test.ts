@@ -176,7 +176,7 @@ describe('Config', () => {
       expect(config.agents).toEqual([]);
       expect(config.synthesisAgent).toBeUndefined();
       expect(config.agenticMaxSteps).toBe(12);
-      expect(config.agenticDiscussionRounds).toBe(1);
+      expect(config.agenticDiscussionRounds).toBe(2);
     });
 
     test('agenticReview parses truthy env values', () => {
@@ -284,15 +284,15 @@ describe('Config', () => {
       delete process.env.AGENTIC_REVIEW;
     });
 
-    test('parses AGENTIC_DISCUSSION_ROUNDS, ignoring junk', () => {
+    test('parses AGENTIC_DISCUSSION_ROUNDS, ignoring junk (default 2)', () => {
       process.env.AGENTIC_DISCUSSION_ROUNDS = '3';
       expect(new Config().agenticDiscussionRounds).toBe(3);
 
       process.env.AGENTIC_DISCUSSION_ROUNDS = '0';
-      expect(new Config().agenticDiscussionRounds).toBe(1);
+      expect(new Config().agenticDiscussionRounds).toBe(2);
 
       process.env.AGENTIC_DISCUSSION_ROUNDS = 'abc';
-      expect(new Config().agenticDiscussionRounds).toBe(1);
+      expect(new Config().agenticDiscussionRounds).toBe(2);
       delete process.env.AGENTIC_DISCUSSION_ROUNDS;
     });
   });

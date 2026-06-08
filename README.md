@@ -172,7 +172,7 @@ The mode is implied by how many agents you configure — there's no mode flag:
   findings; the synthesis agent finalizes.
 - **multiple agents** (`AGENTS` has 2+) — **explore → discuss → synthesize**.
   After exploring, the panel agents critique **each other's** findings for
-  `AGENTIC_DISCUSSION_ROUNDS` rounds (default 1) — each round every agent sees
+  `AGENTIC_DISCUSSION_ROUNDS` rounds (default 2) — each round every agent sees
   the others' findings and agrees, refutes (verifying with tools), or adds
   missed issues, keeping its own model and persona.
 
@@ -185,7 +185,7 @@ does **not** reuse an explorer agent.
         env:
           # ...
           AGENTIC_REVIEW: "true"
-          AGENTIC_DISCUSSION_ROUNDS: "1"       # used when 2+ agents
+          AGENTIC_DISCUSSION_ROUNDS: "2"       # default; used when 2+ agents
           # Simple: comma-separated model names (id defaults to the model):
           AGENTS: "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro"
           # — or — a JSON array with ids, focuses, per-agent endpoints, and a
@@ -204,7 +204,7 @@ does **not** reuse an explorer agent.
 | `AGENTIC_REVIEW` | `false` | Enable the agentic, context-aware reviewer |
 | `AGENTS` | _(empty)_ | Explorer panel; overrides `LLM_MODEL` when set. 1 agent = single; 2+ = discuss |
 | `SYNTHESIS_AGENT` | `LLM_MODEL` | Agent that merges findings into the final review |
-| `AGENTIC_DISCUSSION_ROUNDS` | `1` | Peer-discussion rounds (used when 2+ agents) |
+| `AGENTIC_DISCUSSION_ROUNDS` | `2` | Peer-discussion rounds (used when 2+ agents) |
 | `AGENTIC_MAX_STEPS` | `12` | Tool-loop steps per agent per explore/discussion call |
 
 ### GitHub Enterprise Server Support

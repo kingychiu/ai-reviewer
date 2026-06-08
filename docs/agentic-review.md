@@ -151,7 +151,7 @@ are optional except where noted.
 |---|---|---|---|---|
 | `AGENTIC_REVIEW` | `agentic_review` | bool | `false` | Master switch. `false` = standard single-shot review (no panel/tools). |
 | `AGENTS` | `agents` | agent list | _(empty)_ | The **explore** panel — and it sets the mode: 0–1 agents = single (explore→synthesize), 2+ agents = discussion (explore→discuss→synthesize). When set, overrides `LLM_MODEL` and the top-level `LLM_*` may be omitted. |
-| `AGENTIC_DISCUSSION_ROUNDS` | `agentic_discussion_rounds` | int > 0 | `1` | How many **discuss** rounds (the `R` in the diagram) when there are 2+ agents. Each round = every agent critiques the others once. Ignored for a single agent. |
+| `AGENTIC_DISCUSSION_ROUNDS` | `agentic_discussion_rounds` | int > 0 | `2` | How many **discuss** rounds (the `R` in the diagram) when there are 2+ agents. Each round = every agent critiques the others once. Ignored for a single agent. |
 | `SYNTHESIS_AGENT` | `synthesis_agent` | single agent | `LLM_MODEL` | The **synthesize** agent (the judge that merges findings → inline comments). |
 | `AGENTIC_MAX_STEPS` | `agentic_max_steps` | int > 0 | `12` | Caps each agent's **tool loop** in a single explore/discussion call. One step = one model turn (optionally a tool call + its result). Higher = the agent can read more files / grep more before concluding (more thorough, more cost/latency); lower = faster/cheaper but shallower. It is *not* the number of comments or rounds. |
 

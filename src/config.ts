@@ -23,7 +23,7 @@ export type AgentSpec = {
 };
 
 const DEFAULT_AGENTIC_MAX_STEPS = 12;
-const DEFAULT_AGENTIC_DISCUSSION_ROUNDS = 1;
+const DEFAULT_AGENTIC_DISCUSSION_ROUNDS = 2;
 
 function parsePositiveInt(value: string | undefined, fallback: number): number {
   const n = Number.parseInt(value || "", 10);
