@@ -267,6 +267,33 @@ describe('Config', () => {
       delete process.env.SYNTHESIS_AGENT;
     });
 
+    test('LLM_MODEL and LLM_API_KEY are optional in multi-agent agentic mode', () => {
+      process.env.LLM_MODEL = '';
+      process.env.LLM_API_KEY = '';
+      process.env.AGENTIC_REVIEW = 'true';
+      process.env.AGENTS = 'deepseek/deepseek-v4-flash, moonshotai/kimi-k2.6';
+
+      expect(() => new Config()).not.toThrow();
+      const config = new Config();
+      expect(config.agents.map((a) => a.model)).toEqual([
+        'deepseek/deepseek-v4-flash',
+        'moonshotai/kimi-k2.6',
+      ]);
+
+      delete process.env.AGENTIC_REVIEW;
+      delete process.env.AGENTS;
+    });
+
+    test('LLM_MODEL still required when agentic review has no AGENTS', () => {
+      process.env.LLM_MODEL = '';
+      process.env.LLM_API_KEY = 'k';
+      process.env.AGENTIC_REVIEW = 'true';
+
+      expect(() => new Config()).toThrow('LLM_MODEL is not set');
+
+      delete process.env.AGENTIC_REVIEW;
+    });
+
     test('parses AGENTIC_DISCUSSION_ROUNDS, ignoring junk', () => {
       process.env.AGENTIC_DISCUSSION_ROUNDS = '3';
       expect(new Config().agenticDiscussionRounds).toBe(3);
@@ -304,10 +331,22 @@ describe('parseAgents', () => {
         instructions: undefined,
         provider: 'ai-sdk',
         baseUrl: undefined,
-        apiKey: undefined,
+        apiKeyEnv: undefined,
       },
       { id: 'y', model: 'y' },
     ]);
+  });
+
+  test('parses apiKeyEnv (secret env name, not a raw key)', () => {
+    const agents = parseAgents(
+      '[{"model":"anthropic/claude-sonnet-4.5","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY"}]'
+    );
+    expect(agents[0]).toMatchObject({
+      id: 'anthropic/claude-sonnet-4.5',
+      model: 'anthropic/claude-sonnet-4.5',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKeyEnv: 'OPENROUTER_API_KEY',
+    });
   });
 
   test('drops entries without a model and handles bad json', () => {

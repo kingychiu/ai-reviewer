@@ -40,7 +40,7 @@ function baseAgent(): AgentSpec {
     model: config.llmModel ?? "",
     provider: config.llmProvider,
     baseUrl: config.llmBaseUrl,
-    apiKey: config.llmApiKey,
+    // key resolves to the top-level LLM_API_KEY in resolveAgent
   };
 }
 
@@ -52,9 +52,15 @@ export function resolveExploreAgents(): AgentSpec[] {
   return config.agents.length > 0 ? config.agents : [baseAgent()];
 }
 
-/** The synthesis (judge) agent — explicit `SYNTHESIS_AGENT`, else `LLM_MODEL`. */
+/**
+ * The synthesis (judge) agent. Precedence: explicit `SYNTHESIS_AGENT` ->
+ * `LLM_MODEL` (base agent) -> the first explorer (only when there's no base
+ * model, i.e. a self-describing multi-agent panel with no top-level LLM_MODEL).
+ */
 export function resolveSynthesisAgent(): AgentSpec {
-  return config.synthesisAgent ?? baseAgent();
+  if (config.synthesisAgent) return config.synthesisAgent;
+  if (config.llmModel) return baseAgent();
+  return resolveExploreAgents()[0];
 }
 
 function buildDiffBlock(files: FileDiff[]): string {

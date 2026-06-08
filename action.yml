@@ -29,11 +29,11 @@ inputs:
     default: 'false'
   agents:
     required: false
-    description: 'The explorer panel for agentic review. Comma-separated model names (e.g. "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro") or a JSON array of agents: [{"id","model","instructions","provider","baseUrl","apiKey"}]. When set, takes precedence over llm_model. Empty = use the single llm_model.'
+    description: 'The explorer panel for agentic review. Comma-separated model names (e.g. "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro") or a JSON array of self-describing agents: [{"id","model","instructions","provider","baseUrl","apiKeyEnv"}]. apiKeyEnv is the NAME of an env var holding the key (never a raw key) so a panel can span platforms. When set, takes precedence over llm_model, and the top-level llm_model/llm_api_key may be left unset.'
     default: ''
   synthesis_agent:
     required: false
-    description: 'Agent that merges the panel''s findings into the final review. Bare model name or a JSON object {"id","model","instructions","provider","baseUrl","apiKey"}. Defaults to llm_model (not an explorer agent).'
+    description: 'Agent that merges the panel''s findings into the final review. Bare model name or a JSON object {"id","model","instructions","provider","baseUrl","apiKeyEnv"}. Defaults to llm_model, else the first agent.'
     default: ''
   review_mode:
     required: false

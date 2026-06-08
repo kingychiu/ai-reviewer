@@ -94,7 +94,6 @@ describe("agent resolution", () => {
         model: "default-model",
         provider: "ai-sdk",
         baseUrl: undefined,
-        apiKey: "key",
       },
     ]);
   });
@@ -121,6 +120,17 @@ describe("agent resolution", () => {
     (config as any).agents = [{ id: "a1", model: "m1" }];
     (config as any).synthesisAgent = { id: "judge", model: "j" };
     expect(resolveSynthesisAgent().id).toBe("judge");
+  });
+
+  test("synthesis falls back to first agent when no LLM_MODEL and no SYNTHESIS_AGENT", () => {
+    // Self-describing panel with top-level LLM_MODEL unset.
+    config.llmModel = "" as any;
+    (config as any).agents = [
+      { id: "a1", model: "m1" },
+      { id: "a2", model: "m2" },
+    ];
+    (config as any).synthesisAgent = undefined;
+    expect(resolveSynthesisAgent().id).toBe("a1");
   });
 });
 

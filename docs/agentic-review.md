@@ -70,10 +70,10 @@ Built on the existing base settings (used as fallbacks for every agent):
 
 | Env var | Purpose |
 |---|---|
-| `LLM_PROVIDER` | Must be `ai-sdk` for agentic review. |
-| `LLM_MODEL` | Required. The base model — used when `AGENTS` is empty, and as the default for `SYNTHESIS_AGENT`. |
-| `LLM_API_KEY` | Default API key for every agent. |
-| `LLM_BASE_URL` | Default base URL (e.g. OpenRouter) for every agent. |
+| `LLM_PROVIDER` | Must be `ai-sdk` for agentic review (this is the default). |
+| `LLM_MODEL` | The base/single model. Required unless a self-describing `AGENTS` panel is used; also the default for `SYNTHESIS_AGENT`. |
+| `LLM_API_KEY` | Default key fallback for agents without an `apiKeyEnv`. Optional when every agent (and the synthesis agent) sets `apiKeyEnv`. |
+| `LLM_BASE_URL` | Default base URL (e.g. OpenRouter) for agents without their own `baseUrl`. |
 | `STYLE_GUIDE_RULES` / `style_guide_rules` | Extra rules injected directly into the explore/discussion prompts. |
 
 > **Model requirement:** because the explore/discussion phases use tool calling,
@@ -125,13 +125,37 @@ SYNTHESIS_AGENT: '{"id":"judge","model":"openai/gpt-5","instructions":"Be conser
 | `model` | ✅ | — | Model id (e.g. `anthropic/claude-sonnet-4.5`). |
 | `id` | — | the `model` | Label used in logs, discussion references, and synthesis attribution. |
 | `instructions` | — | _(none)_ | Focus/persona appended to that agent's prompt (see [instruction usage](#prompt-composition--instruction-usage)). |
-| `provider` | — | `LLM_PROVIDER` | Must resolve to `ai-sdk`. |
+| `provider` | — | `LLM_PROVIDER` (→ `ai-sdk`) | Must resolve to `ai-sdk`. |
 | `baseUrl` | — | `LLM_BASE_URL` | Per-agent endpoint (mix providers across the panel). |
-| `apiKey` | — | `LLM_API_KEY` | Per-agent key. |
+| `apiKeyEnv` | — | _(falls back to `LLM_API_KEY`)_ | **Name** of an env var holding this agent's key (e.g. `OPENROUTER_API_KEY`). Raw keys are not accepted — see [Secrets & multi-platform](#secrets--multi-platform). |
 
-Precedence: `AGENTS` non-empty ⇒ `LLM_MODEL` is ignored for exploring (still
-the default for `SYNTHESIS_AGENT`). `AGENTS` empty ⇒ a single agent built from
-`LLM_MODEL` is used.
+Precedence: `AGENTS` non-empty ⇒ each agent self-describes and the top-level
+`LLM_MODEL`/`LLM_API_KEY` may be left unset. `AGENTS` empty ⇒ a single agent
+built from `LLM_MODEL` is used.
+
+### Secrets & multi-platform
+
+Never put raw API keys in `AGENTS` (it's a plain config string). Instead:
+
+1. Add each platform's key as a **repo secret** (e.g. `OPENROUTER_API_KEY`,
+   `ANTHROPIC_API_KEY`).
+2. Expose them as **env vars** in the workflow step:
+   ```yaml
+   env:
+     OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+     ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+   ```
+3. Reference them **by name** in each agent via `apiKeyEnv`:
+   ```yaml
+   AGENTS: >-
+     [{"id":"sec","model":"anthropic/claude-sonnet-4.5","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY"},
+      {"id":"logic","model":"claude-sonnet-4-5","apiKeyEnv":"ANTHROPIC_API_KEY"}]
+   ```
+
+Key resolution per agent: `env[apiKeyEnv]` → top-level `LLM_API_KEY`. An agent
+with no `apiKeyEnv` uses `LLM_API_KEY` (itself sourced from a secret). In
+multi-agent mode where every agent sets `apiKeyEnv`, `LLM_API_KEY` /
+`LLM_MODEL` / `LLM_BASE_URL` can all be omitted.
 
 ---
 

@@ -66,7 +66,8 @@ describe("runAgent", () => {
     expect(mockGenerateText.mock.calls[0][0].maxSteps).toBe(5);
   });
 
-  test("routes unknown models through OpenAI-compatible client when baseUrl is set", async () => {
+  test("routes unknown models through OpenAI-compatible client, key from apiKeyEnv", async () => {
+    process.env.OR_TEST_KEY = "or-key-from-env";
     await runAgent({
       systemPrompt: "s",
       prompt: "p",
@@ -75,16 +76,17 @@ describe("runAgent", () => {
         id: "claude-or",
         model: "anthropic/claude-sonnet-4.5",
         baseUrl: "https://openrouter.ai/api/v1",
-        apiKey: "or-key",
+        apiKeyEnv: "OR_TEST_KEY",
       }),
     });
 
     expect(mockCreateOpenAI).toHaveBeenCalledWith(
       expect.objectContaining({
-        apiKey: "or-key",
+        apiKey: "or-key-from-env",
         baseURL: "https://openrouter.ai/api/v1",
       })
     );
+    delete process.env.OR_TEST_KEY;
   });
 
   test("rejects non ai-sdk providers", async () => {

@@ -337,6 +337,8 @@ function createAiSdkLanguageModel(spec: {
 
 // Validate an agent is usable for an agentic (ai-sdk) call and return its
 // resolved {model, baseUrl, apiKey}. Throws on non-ai-sdk providers / no model.
+// API key resolution: env[apiKeyEnv] -> top-level LLM_API_KEY. Raw keys are not
+// accepted in the agent spec (so secrets never live in the AGENTS config).
 function resolveAgent(agent?: AgentSpec): {
   model: string;
   baseUrl?: string;
@@ -353,7 +355,19 @@ function resolveAgent(agent?: AgentSpec): {
   if (!model) {
     throw new Error("No model configured for agentic review");
   }
-  return { model, baseUrl: agent?.baseUrl, apiKey: agent?.apiKey };
+
+  let apiKey: string | undefined;
+  if (agent?.apiKeyEnv) {
+    apiKey = process.env[agent.apiKeyEnv];
+    if (!apiKey) {
+      console.warn(
+        `Agent '${agent.id}': apiKeyEnv '${agent.apiKeyEnv}' is not set in the environment.`
+      );
+    }
+  }
+  apiKey = apiKey ?? config.llmApiKey;
+
+  return { model, baseUrl: agent?.baseUrl, apiKey };
 }
 
 export type RunAgentResult = {

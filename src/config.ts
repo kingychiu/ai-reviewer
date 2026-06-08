@@ -9,6 +9,11 @@ export type ReviewMode = "single" | "discussion";
  * single agent can be just a model name while another points at a completely
  * different provider/endpoint. `id` is a human label (logs, attribution) and
  * `instructions` is an optional focus/persona appended to that agent's prompt.
+ *
+ * Keys: use `apiKeyEnv` — the NAME of an environment variable holding the key
+ * (e.g. "OPENROUTER_API_KEY") — so a panel can span platforms/billing without
+ * putting raw secrets in the AGENTS config. Raw keys are intentionally not
+ * accepted here. Resolution: env[apiKeyEnv] -> top-level LLM_API_KEY.
  */
 export type AgentSpec = {
   id: string;
@@ -16,7 +21,7 @@ export type AgentSpec = {
   instructions?: string;
   provider?: string;
   baseUrl?: string;
-  apiKey?: string;
+  apiKeyEnv?: string;
 };
 
 const DEFAULT_AGENTIC_MAX_STEPS = 12;
@@ -51,7 +56,7 @@ function toAgentSpec(entry: unknown): AgentSpec | null {
       instructions: str(e.instructions),
       provider: str(e.provider),
       baseUrl: str(e.baseUrl),
-      apiKey: str(e.apiKey),
+      apiKeyEnv: str(e.apiKeyEnv),
     };
   }
   return null;
@@ -149,27 +154,18 @@ export class Config {
       throw new Error("GITHUB_TOKEN is not set");
     }
 
-    this.llmModel = process.env.LLM_MODEL || getInput("llm_model");
-    if (!this.llmModel?.length) {
-      throw new Error("LLM_MODEL is not set");
-    }
-
+    // Top-level provider/base URL/key are the single-model defaults and the
+    // per-agent fallbacks. In multi-agent agentic mode each agent self-describes
+    // (model + provider + baseUrl + key), so these may be left unset.
     this.llmProvider = process.env.LLM_PROVIDER || getInput("llm_provider");
     if (!this.llmProvider?.length) {
       this.llmProvider = AIProviderType.AI_SDK;
-      console.log(`Using default LLM_PROVIDER '${this.llmProvider}'`);
     }
-
     this.llmApiKey = process.env.LLM_API_KEY;
-    const isSapAiSdk = this.llmProvider === AIProviderType.SAP_AI_SDK;
-    // SAP AI SDK does not require an API key
-    if (!this.llmApiKey && !isSapAiSdk) {
-      throw new Error("LLM_API_KEY is not set");
-    }
-
     const baseUrlFromEnv = process.env.LLM_BASE_URL;
     const baseUrlFromInput = getInput("llm_base_url");
     this.llmBaseUrl = baseUrlFromEnv || baseUrlFromInput || undefined;
+    this.llmModel = process.env.LLM_MODEL || getInput("llm_model");
 
     // Agentic review configuration (all optional, default to the existing
     // single-shot behavior when unset).
@@ -179,14 +175,26 @@ export class Config {
 
     // Explorer panel. Empty by default: when no agents are given, the single
     // `llmModel` takes effect. When non-empty, `agents` takes precedence and
-    // `llmModel` is ignored by the agentic reviewer.
+    // each agent self-describes its model/provider/baseUrl/key.
     this.agents = parseAgents(process.env.AGENTS || getInput("agents"));
 
-    // Synthesis (judge) agent (optional). Falls back to llmModel in the
-    // orchestrator when unset.
+    // Synthesis (judge) agent (optional). Falls back to llmModel, else the first
+    // agent, in the orchestrator when unset.
     this.synthesisAgent = parseAgent(
       process.env.SYNTHESIS_AGENT || getInput("synthesis_agent")
     );
+
+    // When the agentic reviewer runs with its own panel, the top-level
+    // LLM_MODEL / LLM_API_KEY are not required (each agent self-describes).
+    const agenticMultiAgent = this.agenticReview && this.agents.length > 0;
+    const isSapAiSdk = this.llmProvider === AIProviderType.SAP_AI_SDK;
+    if (!this.llmModel?.length && !agenticMultiAgent) {
+      throw new Error("LLM_MODEL is not set");
+    }
+    // SAP AI SDK does not require an API key.
+    if (!this.llmApiKey && !isSapAiSdk && !agenticMultiAgent) {
+      throw new Error("LLM_API_KEY is not set");
+    }
 
     const mode = (
       process.env.REVIEW_MODE ||

@@ -157,10 +157,13 @@ summary and everything else are unchanged. It requires `LLM_PROVIDER=ai-sdk`
 #### A panel of agents (single or discussion)
 
 With agentic review enabled you can run a **panel of agents** via `AGENTS`. When
-set it **takes precedence over `LLM_MODEL`**; when empty the single `LLM_MODEL`
-is used. Each agent has an `id` (label used in logs/attribution), a `model`,
-optional `instructions` (a focus/persona), and optional `provider`/`baseUrl`/
-`apiKey` so different agents can use different providers.
+set it **takes precedence over `LLM_MODEL`** (and the top-level `LLM_*` may be
+omitted); when empty the single `LLM_MODEL` is used. Each agent has an `id`
+(label used in logs/attribution), a `model`, optional `instructions` (a
+focus/persona), and optional `provider`/`baseUrl`/`apiKeyEnv` so different agents
+can use different platforms. `apiKeyEnv` names a **secret env var** holding the
+key (never a raw key) — see [docs/agentic-review.md](docs/agentic-review.md) →
+*Secrets & multi-platform*.
 
 There are two modes, set by `REVIEW_MODE`:
 
@@ -187,10 +190,11 @@ does **not** reuse an explorer agent.
           AGENTIC_DISCUSSION_ROUNDS: "1"       # rounds (discussion mode only)
           # Simple: comma-separated model names (id defaults to the model):
           AGENTS: "anthropic/claude-sonnet-4.5, google/gemini-2.5-pro"
-          # — or — a JSON array with ids, focuses, and per-agent providers:
+          # — or — a JSON array with ids, focuses, per-agent endpoints, and a
+          # secret env-var NAME per agent (apiKeyEnv) for multi-platform panels:
           # AGENTS: >-
-          #   [{"id":"security","model":"anthropic/claude-sonnet-4.5","instructions":"Focus on security: injection, authz, secrets."},
-          #    {"id":"correctness","model":"google/gemini-2.5-pro","instructions":"Focus on logic bugs and edge cases."}]
+          #   [{"id":"security","model":"anthropic/claude-sonnet-4.5","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY","instructions":"Focus on security."},
+          #    {"id":"correctness","model":"google/gemini-2.5-pro","baseUrl":"https://openrouter.ai/api/v1","apiKeyEnv":"OPENROUTER_API_KEY","instructions":"Focus on logic bugs."}]
           SYNTHESIS_AGENT: "openai/gpt-5"      # bare name or JSON object
 ```
 
